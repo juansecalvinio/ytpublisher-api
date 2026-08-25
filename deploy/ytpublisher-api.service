@@ -1,0 +1,13 @@
+[Unit]
+Description=YTPublisher API
+After=network.target
+
+[Service]
+ExecStart=/opt/ytpublisher-api/ytpublisher-api
+Restart=on-failure
+User=ec2-user
+EnvironmentFile=/opt/ytpublisher-api/.env
+WorkingDirectory=/opt/ytpublisher-api
+
+[Install]
+WantedBy=multi-user.target
