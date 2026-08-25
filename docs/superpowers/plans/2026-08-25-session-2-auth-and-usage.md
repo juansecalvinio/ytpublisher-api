@@ -412,6 +412,15 @@ func TestInsertUsageEvent_Succeeds(t *testing.T) {
 	if err != nil {
 		t.Errorf("InsertUsageEvent() returned unexpected error: %v", err)
 	}
+	// Registered after the DeleteClient cleanup above, so it runs first
+	// (t.Cleanup is LIFO) and avoids violating the usage_events -> api_clients
+	// foreign key when the client is deleted.
+	t.Cleanup(func() {
+		if _, err := store.pool.Exec(context.Background(),
+			`DELETE FROM usage_events WHERE client_id = $1`, client.ID); err != nil {
+			t.Errorf("cleanup delete usage_events returned error: %v", err)
+		}
+	})
 }
 ```
 
