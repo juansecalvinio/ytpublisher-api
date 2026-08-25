@@ -147,7 +147,7 @@ func TestHash_DiffersForDifferentInput(t *testing.T) {
 
 func TestHash_MatchesKnownSHA256Vector(t *testing.T) {
 	got := Hash("")
-	want := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85"
+	want := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 	if got != want {
 		t.Errorf("Hash(\"\") = %q, want %q", got, want)
 	}
