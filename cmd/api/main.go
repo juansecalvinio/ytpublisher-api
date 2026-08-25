@@ -24,7 +24,8 @@ func main() {
 	defer pool.Close()
 	log.Println("connected to database")
 
-	router := api.NewRouter()
+	store := storage.NewStore(pool)
+	router := api.NewRouter(store, store)
 
 	log.Printf("listening on :%s", cfg.Port)
 	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil {
