@@ -11,15 +11,20 @@ type Config struct {
 	DatabaseURL          string
 	YouTubeAPIKey        string
 	YouTubeDailyQuotaCap int
+	StyleCacheTTLHours   int
 }
 
 var (
 	ErrMissingDatabaseURL   = errors.New("config: DATABASE_URL is required")
 	ErrMissingYouTubeAPIKey = errors.New("config: YOUTUBE_API_KEY is required")
 	ErrInvalidQuotaCap      = errors.New("config: YOUTUBE_DAILY_QUOTA_CAP must be a positive integer")
+	ErrInvalidStyleCacheTTL = errors.New("config: STYLE_CACHE_TTL_HOURS must be a positive integer")
 )
 
-const defaultYouTubeDailyQuotaCap = 9000
+const (
+	defaultYouTubeDailyQuotaCap = 9000
+	defaultStyleCacheTTLHours   = 48
+)
 
 func Load() (Config, error) {
 	cfg := Config{
@@ -44,6 +49,15 @@ func Load() (Config, error) {
 			return Config{}, ErrInvalidQuotaCap
 		}
 		cfg.YouTubeDailyQuotaCap = cap
+	}
+
+	cfg.StyleCacheTTLHours = defaultStyleCacheTTLHours
+	if raw := os.Getenv("STYLE_CACHE_TTL_HOURS"); raw != "" {
+		hours, err := strconv.Atoi(raw)
+		if err != nil || hours <= 0 {
+			return Config{}, ErrInvalidStyleCacheTTL
+		}
+		cfg.StyleCacheTTLHours = hours
 	}
 
 	return cfg, nil
