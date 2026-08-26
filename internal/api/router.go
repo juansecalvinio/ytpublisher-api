@@ -7,13 +7,14 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func NewRouter(finder ClientFinder, recorder UsageRecorder) *chi.Mux {
+func NewRouter(finder ClientFinder, recorder UsageRecorder, syncer ChannelSyncer) *chi.Mux {
 	r := chi.NewRouter()
 	r.Get("/healthz", handleHealthz)
 
 	r.Group(func(r chi.Router) {
 		r.Use(RequireAPIKey(finder, recorder))
 		r.Get("/v1/whoami", handleWhoami)
+		r.Post("/v1/internal/channels/{channelID}/sync", handleChannelSync(syncer))
 	})
 
 	return r
