@@ -709,6 +709,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -740,8 +741,16 @@ func TestUpsertChannelStyle_ThenGetChannelStyle(t *testing.T) {
 	if found.VideoCountAnalyzed != 10 {
 		t.Errorf("VideoCountAnalyzed = %d, want 10", found.VideoCountAnalyzed)
 	}
-	if string(found.SummaryJSON) != string(summaryJSON) {
-		t.Errorf("SummaryJSON = %s, want %s", found.SummaryJSON, summaryJSON)
+
+	// jsonb reorders object keys internally (by length, then lexicographically),
+	// so comparing raw bytes against the original input is the wrong check —
+	// compare the parsed content instead.
+	var foundValue map[string]any
+	if err := json.Unmarshal(found.SummaryJSON, &foundValue); err != nil {
+		t.Fatalf("json.Unmarshal(found.SummaryJSON) returned unexpected error: %v", err)
+	}
+	if foundValue["confidence"] != "high" {
+		t.Errorf("SummaryJSON[\"confidence\"] = %v, want %q", foundValue["confidence"], "high")
 	}
 }
 
