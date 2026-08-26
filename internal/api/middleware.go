@@ -34,7 +34,7 @@ func RequireAPIKey(finder ClientFinder, recorder UsageRecorder) func(http.Handle
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key, ok := bearerToken(r.Header.Get("Authorization"))
 			if !ok {
-				writeUnauthorized(w)
+				writeJSONError(w, http.StatusUnauthorized, "invalid or missing API key")
 				return
 			}
 
@@ -43,7 +43,7 @@ func RequireAPIKey(finder ClientFinder, recorder UsageRecorder) func(http.Handle
 				if !errors.Is(err, storage.ErrClientNotFound) {
 					log.Printf("auth: lookup failed: %v", err)
 				}
-				writeUnauthorized(w)
+				writeJSONError(w, http.StatusUnauthorized, "invalid or missing API key")
 				return
 			}
 
@@ -76,8 +76,8 @@ func bearerToken(header string) (string, bool) {
 	return token, true
 }
 
-func writeUnauthorized(w http.ResponseWriter) {
+func writeJSONError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
-	json.NewEncoder(w).Encode(map[string]string{"error": "invalid or missing API key"})
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
