@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/pgvector/pgvector-go"
 )
 
 type ChannelVideo struct {
@@ -13,6 +15,7 @@ type ChannelVideo struct {
 	Description string
 	Tags        []string
 	PublishedAt time.Time
+	Embedding   []float32
 }
 
 func (s *Store) UpsertChannelVideos(ctx context.Context, channelID string, videos []ChannelVideo) error {
@@ -48,9 +51,58 @@ func (s *Store) UpsertChannelVideos(ctx context.Context, channelID string, video
 
 func (s *Store) ListChannelVideos(ctx context.Context, channelID string) ([]ChannelVideo, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT video_id, title, description, tags_json, published_at
+		`SELECT video_id, title, description, tags_json, published_at, embedding
 		 FROM channel_videos WHERE channel_id = $1 ORDER BY published_at DESC`,
 		channelID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var videos []ChannelVideo
+	for rows.Next() {
+		var v ChannelVideo
+		var tagsJSON []byte
+		var embedding *pgvector.Vector
+		if err := rows.Scan(&v.VideoID, &v.Title, &v.Description, &tagsJSON, &v.PublishedAt, &embedding); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(tagsJSON, &v.Tags); err != nil {
+			return nil, err
+		}
+		if embedding != nil {
+			v.Embedding = embedding.Slice()
+		}
+		v.ChannelID = channelID
+		videos = append(videos, v)
+	}
+	return videos, rows.Err()
+}
+
+func (s *Store) DeleteChannelVideos(ctx context.Context, channelID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM channel_videos WHERE channel_id = $1`, channelID)
+	return err
+}
+
+func (s *Store) UpdateChannelVideoEmbedding(ctx context.Context, channelID, videoID string, embedding []float32) error {
+	vec := pgvector.NewVector(embedding)
+	_, err := s.pool.Exec(ctx,
+		`UPDATE channel_videos SET embedding = $1 WHERE channel_id = $2 AND video_id = $3`,
+		vec, channelID, videoID,
+	)
+	return err
+}
+
+func (s *Store) FindSimilarVideos(ctx context.Context, channelID string, queryEmbedding []float32, limit int) ([]ChannelVideo, error) {
+	vec := pgvector.NewVector(queryEmbedding)
+	rows, err := s.pool.Query(ctx,
+		`SELECT video_id, title, description, tags_json, published_at
+		 FROM channel_videos
+		 WHERE channel_id = $1 AND embedding IS NOT NULL
+		 ORDER BY embedding <=> $2
+		 LIMIT $3`,
+		channelID, vec, limit,
 	)
 	if err != nil {
 		return nil, err
@@ -71,9 +123,4 @@ func (s *Store) ListChannelVideos(ctx context.Context, channelID string) ([]Chan
 		videos = append(videos, v)
 	}
 	return videos, rows.Err()
-}
-
-func (s *Store) DeleteChannelVideos(ctx context.Context, channelID string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM channel_videos WHERE channel_id = $1`, channelID)
-	return err
 }
