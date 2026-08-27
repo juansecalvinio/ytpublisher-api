@@ -5,12 +5,19 @@ import (
 	"testing"
 )
 
-func TestLoad_UsesDefaultPortWhenUnset(t *testing.T) {
-	t.Setenv("PORT", "")
+func setRequiredEnv(t *testing.T) {
+	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("YOUTUBE_API_KEY", "test-key")
 	t.Setenv("YOUTUBE_DAILY_QUOTA_CAP", "")
 	t.Setenv("STYLE_CACHE_TTL_HOURS", "")
+	t.Setenv("VOYAGE_API_KEY", "test-voyage-key")
+	t.Setenv("VOYAGE_MODEL", "")
+}
+
+func TestLoad_UsesDefaultPortWhenUnset(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("PORT", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -22,11 +29,8 @@ func TestLoad_UsesDefaultPortWhenUnset(t *testing.T) {
 }
 
 func TestLoad_ReadsCustomPort(t *testing.T) {
+	setRequiredEnv(t)
 	t.Setenv("PORT", "9090")
-	t.Setenv("DATABASE_URL", "postgres://example")
-	t.Setenv("YOUTUBE_API_KEY", "test-key")
-	t.Setenv("YOUTUBE_DAILY_QUOTA_CAP", "")
-	t.Setenv("STYLE_CACHE_TTL_HOURS", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -38,11 +42,8 @@ func TestLoad_ReadsCustomPort(t *testing.T) {
 }
 
 func TestLoad_ReadsDatabaseURL(t *testing.T) {
-	t.Setenv("PORT", "8080")
+	setRequiredEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://user:pass@host:5432/db")
-	t.Setenv("YOUTUBE_API_KEY", "test-key")
-	t.Setenv("YOUTUBE_DAILY_QUOTA_CAP", "")
-	t.Setenv("STYLE_CACHE_TTL_HOURS", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -54,11 +55,8 @@ func TestLoad_ReadsDatabaseURL(t *testing.T) {
 }
 
 func TestLoad_ErrorsWhenDatabaseURLMissing(t *testing.T) {
-	t.Setenv("PORT", "8080")
+	setRequiredEnv(t)
 	t.Setenv("DATABASE_URL", "")
-	t.Setenv("YOUTUBE_API_KEY", "test-key")
-	t.Setenv("YOUTUBE_DAILY_QUOTA_CAP", "")
-	t.Setenv("STYLE_CACHE_TTL_HOURS", "")
 
 	_, err := Load()
 	if !errors.Is(err, ErrMissingDatabaseURL) {
@@ -67,11 +65,8 @@ func TestLoad_ErrorsWhenDatabaseURLMissing(t *testing.T) {
 }
 
 func TestLoad_ErrorsWhenYouTubeAPIKeyMissing(t *testing.T) {
-	t.Setenv("PORT", "8080")
-	t.Setenv("DATABASE_URL", "postgres://example")
+	setRequiredEnv(t)
 	t.Setenv("YOUTUBE_API_KEY", "")
-	t.Setenv("YOUTUBE_DAILY_QUOTA_CAP", "")
-	t.Setenv("STYLE_CACHE_TTL_HOURS", "")
 
 	_, err := Load()
 	if !errors.Is(err, ErrMissingYouTubeAPIKey) {
@@ -80,11 +75,7 @@ func TestLoad_ErrorsWhenYouTubeAPIKeyMissing(t *testing.T) {
 }
 
 func TestLoad_UsesDefaultQuotaCapWhenUnset(t *testing.T) {
-	t.Setenv("PORT", "8080")
-	t.Setenv("DATABASE_URL", "postgres://example")
-	t.Setenv("YOUTUBE_API_KEY", "test-key")
-	t.Setenv("YOUTUBE_DAILY_QUOTA_CAP", "")
-	t.Setenv("STYLE_CACHE_TTL_HOURS", "")
+	setRequiredEnv(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -96,11 +87,8 @@ func TestLoad_UsesDefaultQuotaCapWhenUnset(t *testing.T) {
 }
 
 func TestLoad_ReadsCustomQuotaCap(t *testing.T) {
-	t.Setenv("PORT", "8080")
-	t.Setenv("DATABASE_URL", "postgres://example")
-	t.Setenv("YOUTUBE_API_KEY", "test-key")
+	setRequiredEnv(t)
 	t.Setenv("YOUTUBE_DAILY_QUOTA_CAP", "5000")
-	t.Setenv("STYLE_CACHE_TTL_HOURS", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -112,11 +100,8 @@ func TestLoad_ReadsCustomQuotaCap(t *testing.T) {
 }
 
 func TestLoad_ErrorsWhenQuotaCapInvalid(t *testing.T) {
-	t.Setenv("PORT", "8080")
-	t.Setenv("DATABASE_URL", "postgres://example")
-	t.Setenv("YOUTUBE_API_KEY", "test-key")
+	setRequiredEnv(t)
 	t.Setenv("YOUTUBE_DAILY_QUOTA_CAP", "not-a-number")
-	t.Setenv("STYLE_CACHE_TTL_HOURS", "")
 
 	_, err := Load()
 	if !errors.Is(err, ErrInvalidQuotaCap) {
@@ -125,11 +110,7 @@ func TestLoad_ErrorsWhenQuotaCapInvalid(t *testing.T) {
 }
 
 func TestLoad_UsesDefaultStyleCacheTTLWhenUnset(t *testing.T) {
-	t.Setenv("PORT", "8080")
-	t.Setenv("DATABASE_URL", "postgres://example")
-	t.Setenv("YOUTUBE_API_KEY", "test-key")
-	t.Setenv("YOUTUBE_DAILY_QUOTA_CAP", "")
-	t.Setenv("STYLE_CACHE_TTL_HOURS", "")
+	setRequiredEnv(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -141,10 +122,7 @@ func TestLoad_UsesDefaultStyleCacheTTLWhenUnset(t *testing.T) {
 }
 
 func TestLoad_ReadsCustomStyleCacheTTL(t *testing.T) {
-	t.Setenv("PORT", "8080")
-	t.Setenv("DATABASE_URL", "postgres://example")
-	t.Setenv("YOUTUBE_API_KEY", "test-key")
-	t.Setenv("YOUTUBE_DAILY_QUOTA_CAP", "")
+	setRequiredEnv(t)
 	t.Setenv("STYLE_CACHE_TTL_HOURS", "72")
 
 	cfg, err := Load()
@@ -157,14 +135,46 @@ func TestLoad_ReadsCustomStyleCacheTTL(t *testing.T) {
 }
 
 func TestLoad_ErrorsWhenStyleCacheTTLInvalid(t *testing.T) {
-	t.Setenv("PORT", "8080")
-	t.Setenv("DATABASE_URL", "postgres://example")
-	t.Setenv("YOUTUBE_API_KEY", "test-key")
-	t.Setenv("YOUTUBE_DAILY_QUOTA_CAP", "")
+	setRequiredEnv(t)
 	t.Setenv("STYLE_CACHE_TTL_HOURS", "not-a-number")
 
 	_, err := Load()
 	if !errors.Is(err, ErrInvalidStyleCacheTTL) {
 		t.Errorf("err = %v, want ErrInvalidStyleCacheTTL", err)
+	}
+}
+
+func TestLoad_ErrorsWhenVoyageAPIKeyMissing(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("VOYAGE_API_KEY", "")
+
+	_, err := Load()
+	if !errors.Is(err, ErrMissingVoyageAPIKey) {
+		t.Errorf("err = %v, want ErrMissingVoyageAPIKey", err)
+	}
+}
+
+func TestLoad_UsesDefaultVoyageModelWhenUnset(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.VoyageModel != "voyage-3.5-lite" {
+		t.Errorf("VoyageModel = %q, want %q", cfg.VoyageModel, "voyage-3.5-lite")
+	}
+}
+
+func TestLoad_ReadsCustomVoyageModel(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("VOYAGE_MODEL", "voyage-3-large")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.VoyageModel != "voyage-3-large" {
+		t.Errorf("VoyageModel = %q, want %q", cfg.VoyageModel, "voyage-3-large")
 	}
 }
