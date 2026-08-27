@@ -10,6 +10,7 @@ import (
 	"github.com/juansecalvinio/ytpublisher-api/internal/apikey"
 	"github.com/juansecalvinio/ytpublisher-api/internal/channelsync"
 	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
+	"github.com/juansecalvinio/ytpublisher-api/internal/styleanalysis"
 	"github.com/juansecalvinio/ytpublisher-api/internal/youtube"
 )
 
@@ -22,11 +23,20 @@ func (f *fakeChannelSyncer) SyncChannel(ctx context.Context, channelID string) (
 	return f.result, f.err
 }
 
+type fakeStyleProvider struct {
+	summary styleanalysis.Summary
+	err     error
+}
+
+func (f *fakeStyleProvider) GetStyle(ctx context.Context, channelID string) (styleanalysis.Summary, error) {
+	return f.summary, f.err
+}
+
 func TestHealthz_ReturnsOK(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 
-	NewRouter(nil, nil, nil).ServeHTTP(rec, req)
+	NewRouter(Dependencies{}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -48,7 +58,7 @@ func TestWhoami_ReturnsClientInfoWithValidKey(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+validKey)
 	rec := httptest.NewRecorder()
 
-	NewRouter(finder, recorder, nil).ServeHTTP(rec, req)
+	NewRouter(Dependencies{Finder: finder, Recorder: recorder}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -67,7 +77,7 @@ func TestWhoami_ReturnsUnauthorizedWithoutKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/whoami", nil)
 	rec := httptest.NewRecorder()
 
-	NewRouter(&fakeClientFinder{}, &fakeUsageRecorder{}, nil).ServeHTTP(rec, req)
+	NewRouter(Dependencies{Finder: &fakeClientFinder{}, Recorder: &fakeUsageRecorder{}}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
@@ -87,7 +97,7 @@ func TestChannelSync_ReturnsSyncResultWithValidKey(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+validKey)
 	rec := httptest.NewRecorder()
 
-	NewRouter(finder, recorder, syncer).ServeHTTP(rec, req)
+	NewRouter(Dependencies{Finder: finder, Recorder: recorder, Syncer: syncer}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -115,7 +125,7 @@ func TestChannelSync_ReturnsNotFoundForUnknownChannel(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+validKey)
 	rec := httptest.NewRecorder()
 
-	NewRouter(finder, recorder, syncer).ServeHTTP(rec, req)
+	NewRouter(Dependencies{Finder: finder, Recorder: recorder, Syncer: syncer}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
@@ -135,12 +145,51 @@ func TestChannelSync_ReturnsTooManyRequestsWhenQuotaExceeded(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+validKey)
 	rec := httptest.NewRecorder()
 
-	NewRouter(finder, recorder, syncer).ServeHTTP(rec, req)
+	NewRouter(Dependencies{Finder: finder, Recorder: recorder, Syncer: syncer}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusTooManyRequests {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
 	}
 	if rec.Header().Get("Retry-After") == "" {
 		t.Error("Retry-After header not set")
+	}
+}
+
+func TestChannelStyle_ReturnsSummaryWithValidKey(t *testing.T) {
+	validKey := "ytpub_validkey"
+	client := storage.Client{ID: "client-1", Name: "Acme", Email: "a@acme.com", IsActive: true}
+	finder := &fakeClientFinder{clientsByHash: map[string]storage.Client{
+		apikey.Hash(validKey): client,
+	}}
+	recorder := &fakeUsageRecorder{}
+	provider := &fakeStyleProvider{summary: styleanalysis.Summary{VideoCountAnalyzed: 10, Confidence: "high"}}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/internal/channels/UC123/style", nil)
+	req.Header.Set("Authorization", "Bearer "+validKey)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{Finder: finder, Recorder: recorder, StyleProvider: provider}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body styleanalysis.Summary
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if body.VideoCountAnalyzed != 10 {
+		t.Errorf("VideoCountAnalyzed = %d, want 10", body.VideoCountAnalyzed)
+	}
+}
+
+func TestChannelStyle_ReturnsUnauthorizedWithoutKey(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/internal/channels/UC123/style", nil)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{Finder: &fakeClientFinder{}, Recorder: &fakeUsageRecorder{}}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
