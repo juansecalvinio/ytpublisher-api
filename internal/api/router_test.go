@@ -32,6 +32,15 @@ func (f *fakeStyleProvider) GetStyle(ctx context.Context, channelID string) (sty
 	return f.summary, f.err
 }
 
+type fakeRelatedVideosProvider struct {
+	videos []storage.ChannelVideo
+	err    error
+}
+
+func (f *fakeRelatedVideosProvider) FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, error) {
+	return f.videos, f.err
+}
+
 func TestHealthz_ReturnsOK(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -185,6 +194,68 @@ func TestChannelStyle_ReturnsSummaryWithValidKey(t *testing.T) {
 
 func TestChannelStyle_ReturnsUnauthorizedWithoutKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/internal/channels/UC123/style", nil)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{Finder: &fakeClientFinder{}, Recorder: &fakeUsageRecorder{}}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestRelatedVideos_ReturnsResultsWithValidKey(t *testing.T) {
+	validKey := "ytpub_validkey"
+	client := storage.Client{ID: "client-1", Name: "Acme", Email: "a@acme.com", IsActive: true}
+	finder := &fakeClientFinder{clientsByHash: map[string]storage.Client{
+		apikey.Hash(validKey): client,
+	}}
+	recorder := &fakeUsageRecorder{}
+	provider := &fakeRelatedVideosProvider{videos: []storage.ChannelVideo{{VideoID: "v1", Title: "Video 1"}}}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/internal/channels/UC123/related-videos?topic=go+programming", nil)
+	req.Header.Set("Authorization", "Bearer "+validKey)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{Finder: finder, Recorder: recorder, RelatedVideos: provider}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if body["topic"] != "go programming" {
+		t.Errorf("topic = %v, want %q", body["topic"], "go programming")
+	}
+	related, ok := body["related_videos"].([]any)
+	if !ok || len(related) != 1 {
+		t.Errorf("related_videos = %v, want a 1-element list", body["related_videos"])
+	}
+}
+
+func TestRelatedVideos_ReturnsBadRequestWithoutTopic(t *testing.T) {
+	validKey := "ytpub_validkey"
+	client := storage.Client{ID: "client-1", Name: "Acme", Email: "a@acme.com", IsActive: true}
+	finder := &fakeClientFinder{clientsByHash: map[string]storage.Client{
+		apikey.Hash(validKey): client,
+	}}
+	recorder := &fakeUsageRecorder{}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/internal/channels/UC123/related-videos", nil)
+	req.Header.Set("Authorization", "Bearer "+validKey)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{Finder: finder, Recorder: recorder}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestRelatedVideos_ReturnsUnauthorizedWithoutKey(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/internal/channels/UC123/related-videos?topic=x", nil)
 	rec := httptest.NewRecorder()
 
 	NewRouter(Dependencies{Finder: &fakeClientFinder{}, Recorder: &fakeUsageRecorder{}}).ServeHTTP(rec, req)

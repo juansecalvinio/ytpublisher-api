@@ -12,6 +12,7 @@ type Dependencies struct {
 	Recorder      UsageRecorder
 	Syncer        ChannelSyncer
 	StyleProvider StyleProvider
+	RelatedVideos RelatedVideosProvider
 }
 
 func NewRouter(deps Dependencies) *chi.Mux {
@@ -23,6 +24,7 @@ func NewRouter(deps Dependencies) *chi.Mux {
 		r.Get("/v1/whoami", handleWhoami)
 		r.Post("/v1/internal/channels/{channelID}/sync", handleChannelSync(deps.Syncer))
 		r.Get("/v1/internal/channels/{channelID}/style", handleChannelStyle(deps.StyleProvider))
+		r.Get("/v1/internal/channels/{channelID}/related-videos", handleRelatedVideos(deps.RelatedVideos))
 	})
 
 	return r

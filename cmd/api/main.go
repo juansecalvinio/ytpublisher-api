@@ -9,6 +9,8 @@ import (
 	"github.com/juansecalvinio/ytpublisher-api/internal/api"
 	"github.com/juansecalvinio/ytpublisher-api/internal/channelsync"
 	"github.com/juansecalvinio/ytpublisher-api/internal/config"
+	"github.com/juansecalvinio/ytpublisher-api/internal/embeddings"
+	"github.com/juansecalvinio/ytpublisher-api/internal/relatedvideos"
 	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
 	"github.com/juansecalvinio/ytpublisher-api/internal/stylecache"
 	"github.com/juansecalvinio/ytpublisher-api/internal/youtube"
@@ -41,11 +43,15 @@ func main() {
 	styleTTL := time.Duration(cfg.StyleCacheTTLHours) * time.Hour
 	styleProvider := stylecache.NewProvider(store, store, styleTTL)
 
+	embeddingsClient := embeddings.NewClient(cfg.VoyageAPIKey, cfg.VoyageModel)
+	relatedVideosProvider := relatedvideos.NewProvider(store, embeddingsClient)
+
 	router := api.NewRouter(api.Dependencies{
 		Finder:        store,
 		Recorder:      store,
 		Syncer:        syncer,
 		StyleProvider: styleProvider,
+		RelatedVideos: relatedVideosProvider,
 	})
 
 	log.Printf("listening on :%s", cfg.Port)
