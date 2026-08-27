@@ -4,11 +4,13 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/juansecalvinio/ytpublisher-api/internal/api"
 	"github.com/juansecalvinio/ytpublisher-api/internal/channelsync"
 	"github.com/juansecalvinio/ytpublisher-api/internal/config"
 	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
+	"github.com/juansecalvinio/ytpublisher-api/internal/stylecache"
 	"github.com/juansecalvinio/ytpublisher-api/internal/youtube"
 )
 
@@ -36,7 +38,15 @@ func main() {
 	}
 	syncer := channelsync.NewSyncer(youtubeClient, store, store, maxVideosPerChannel, cfg.YouTubeDailyQuotaCap)
 
-	router := api.NewRouter(store, store, syncer)
+	styleTTL := time.Duration(cfg.StyleCacheTTLHours) * time.Hour
+	styleProvider := stylecache.NewProvider(store, store, styleTTL)
+
+	router := api.NewRouter(api.Dependencies{
+		Finder:        store,
+		Recorder:      store,
+		Syncer:        syncer,
+		StyleProvider: styleProvider,
+	})
 
 	log.Printf("listening on :%s", cfg.Port)
 	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil {
