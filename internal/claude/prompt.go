@@ -44,6 +44,7 @@ func buildGeneratePrompt(input GenerateInput) (string, error) {
 		b.WriteString(fmt.Sprintf("\nFor context only (do not invent a related videos list — that is handled separately), the channel's most relevant existing videos on this topic are: %s\n", strings.Join(relatedTitles, "; ")))
 	}
 	b.WriteString("\nThe hook must be under 125 characters and be the literal opening of the description. Only fill links_section or mentions_section if links or mentions were provided above; otherwise leave them as empty strings.")
+	b.WriteString("\nAlways include at least 3 relevant tags in the tags array — never leave it empty.")
 
 	return b.String(), nil
 }
@@ -65,6 +66,7 @@ func buildRepairPrompt(draft ContentDraft, violations []rules.Violation) (string
 	b.WriteString("\n\nIt has the following problems:\n")
 	b.WriteString(strings.Join(messages, "\n"))
 	b.WriteString("\n\nReturn a corrected version that fixes ONLY these problems, keeping everything else as close to the original as possible.")
+	b.WriteString(" For any character-limit problem, aim comfortably under the stated limit (a few characters of margin), not exactly at it — character counting is easy to get slightly wrong.")
 
 	return b.String(), nil
 }
