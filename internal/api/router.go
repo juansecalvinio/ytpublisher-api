@@ -13,6 +13,7 @@ type Dependencies struct {
 	Syncer        ChannelSyncer
 	StyleProvider StyleProvider
 	RelatedVideos RelatedVideosProvider
+	Generator     GenerationOrchestrator
 }
 
 func NewRouter(deps Dependencies) *chi.Mux {
@@ -25,6 +26,7 @@ func NewRouter(deps Dependencies) *chi.Mux {
 		r.Post("/v1/internal/channels/{channelID}/sync", handleChannelSync(deps.Syncer))
 		r.Get("/v1/internal/channels/{channelID}/style", handleChannelStyle(deps.StyleProvider))
 		r.Get("/v1/internal/channels/{channelID}/related-videos", handleRelatedVideos(deps.RelatedVideos))
+		r.Post("/v1/generate", handleGenerate(deps.Generator))
 	})
 
 	return r
