@@ -13,6 +13,8 @@ func setRequiredEnv(t *testing.T) {
 	t.Setenv("STYLE_CACHE_TTL_HOURS", "")
 	t.Setenv("VOYAGE_API_KEY", "test-voyage-key")
 	t.Setenv("VOYAGE_MODEL", "")
+	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+	t.Setenv("ANTHROPIC_MODEL", "")
 }
 
 func TestLoad_UsesDefaultPortWhenUnset(t *testing.T) {
@@ -176,5 +178,40 @@ func TestLoad_ReadsCustomVoyageModel(t *testing.T) {
 	}
 	if cfg.VoyageModel != "voyage-3-large" {
 		t.Errorf("VoyageModel = %q, want %q", cfg.VoyageModel, "voyage-3-large")
+	}
+}
+
+func TestLoad_ErrorsWhenAnthropicAPIKeyMissing(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	_, err := Load()
+	if !errors.Is(err, ErrMissingAnthropicAPIKey) {
+		t.Errorf("err = %v, want ErrMissingAnthropicAPIKey", err)
+	}
+}
+
+func TestLoad_UsesDefaultAnthropicModelWhenUnset(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.AnthropicModel != "claude-sonnet-5" {
+		t.Errorf("AnthropicModel = %q, want %q", cfg.AnthropicModel, "claude-sonnet-5")
+	}
+}
+
+func TestLoad_ReadsCustomAnthropicModel(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("ANTHROPIC_MODEL", "claude-opus-5")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.AnthropicModel != "claude-opus-5" {
+		t.Errorf("AnthropicModel = %q, want %q", cfg.AnthropicModel, "claude-opus-5")
 	}
 }

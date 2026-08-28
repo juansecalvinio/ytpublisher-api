@@ -14,28 +14,33 @@ type Config struct {
 	StyleCacheTTLHours   int
 	VoyageAPIKey         string
 	VoyageModel          string
+	AnthropicAPIKey      string
+	AnthropicModel       string
 }
 
 var (
-	ErrMissingDatabaseURL   = errors.New("config: DATABASE_URL is required")
-	ErrMissingYouTubeAPIKey = errors.New("config: YOUTUBE_API_KEY is required")
-	ErrInvalidQuotaCap      = errors.New("config: YOUTUBE_DAILY_QUOTA_CAP must be a positive integer")
-	ErrInvalidStyleCacheTTL = errors.New("config: STYLE_CACHE_TTL_HOURS must be a positive integer")
-	ErrMissingVoyageAPIKey  = errors.New("config: VOYAGE_API_KEY is required")
+	ErrMissingDatabaseURL     = errors.New("config: DATABASE_URL is required")
+	ErrMissingYouTubeAPIKey   = errors.New("config: YOUTUBE_API_KEY is required")
+	ErrInvalidQuotaCap        = errors.New("config: YOUTUBE_DAILY_QUOTA_CAP must be a positive integer")
+	ErrInvalidStyleCacheTTL   = errors.New("config: STYLE_CACHE_TTL_HOURS must be a positive integer")
+	ErrMissingVoyageAPIKey    = errors.New("config: VOYAGE_API_KEY is required")
+	ErrMissingAnthropicAPIKey = errors.New("config: ANTHROPIC_API_KEY is required")
 )
 
 const (
 	defaultYouTubeDailyQuotaCap = 9000
 	defaultStyleCacheTTLHours   = 48
 	defaultVoyageModel          = "voyage-3.5-lite"
+	defaultAnthropicModel       = "claude-sonnet-5"
 )
 
 func Load() (Config, error) {
 	cfg := Config{
-		Port:          os.Getenv("PORT"),
-		DatabaseURL:   os.Getenv("DATABASE_URL"),
-		YouTubeAPIKey: os.Getenv("YOUTUBE_API_KEY"),
-		VoyageAPIKey:  os.Getenv("VOYAGE_API_KEY"),
+		Port:            os.Getenv("PORT"),
+		DatabaseURL:     os.Getenv("DATABASE_URL"),
+		YouTubeAPIKey:   os.Getenv("YOUTUBE_API_KEY"),
+		VoyageAPIKey:    os.Getenv("VOYAGE_API_KEY"),
+		AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
 	}
 	if cfg.Port == "" {
 		cfg.Port = "8080"
@@ -48,6 +53,9 @@ func Load() (Config, error) {
 	}
 	if cfg.VoyageAPIKey == "" {
 		return Config{}, ErrMissingVoyageAPIKey
+	}
+	if cfg.AnthropicAPIKey == "" {
+		return Config{}, ErrMissingAnthropicAPIKey
 	}
 
 	cfg.YouTubeDailyQuotaCap = defaultYouTubeDailyQuotaCap
@@ -71,6 +79,11 @@ func Load() (Config, error) {
 	cfg.VoyageModel = os.Getenv("VOYAGE_MODEL")
 	if cfg.VoyageModel == "" {
 		cfg.VoyageModel = defaultVoyageModel
+	}
+
+	cfg.AnthropicModel = os.Getenv("ANTHROPIC_MODEL")
+	if cfg.AnthropicModel == "" {
+		cfg.AnthropicModel = defaultAnthropicModel
 	}
 
 	return cfg, nil
