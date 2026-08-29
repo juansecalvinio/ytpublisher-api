@@ -3,6 +3,8 @@ package generation
 import (
 	"context"
 	"fmt"
+	"log"
+	"regexp"
 	"strings"
 
 	"github.com/juansecalvinio/ytpublisher-api/internal/claude"
@@ -49,6 +51,13 @@ type Output struct {
 
 const relatedVideosLimit = 5
 
+// maxGenerationAttempts caps how many times we'll call Generate() when the
+// draft looks broken (leaked tool-call syntax, or an empty title/tags that
+// slipped past the schema's "required" check, since required only means
+// present, not non-empty). Total attempts, including the first — so this
+// allows up to maxGenerationAttempts-1 retries.
+const maxGenerationAttempts = 3
+
 type Orchestrator struct {
 	style   StyleProvider
 	related RelatedVideosFinder
@@ -70,7 +79,7 @@ func (o *Orchestrator) Generate(ctx context.Context, input Input) (Output, error
 		return Output{}, fmt.Errorf("generation: finding related videos: %w", err)
 	}
 
-	draft, err := o.llm.Generate(ctx, claude.GenerateInput{
+	llmInput := claude.GenerateInput{
 		Topic:         input.Topic,
 		Notes:         input.Notes,
 		Language:      input.Language,
@@ -79,20 +88,39 @@ func (o *Orchestrator) Generate(ctx context.Context, input Input) (Output, error
 		Tone:          input.Tone,
 		StyleSummary:  styleSummary,
 		RelatedVideos: relatedVideos,
-	})
+	}
+
+	draft, err := o.llm.Generate(ctx, llmInput)
 	if err != nil {
 		return Output{}, fmt.Errorf("generation: generating content: %w", err)
 	}
 
+	for attempt := 1; attempt < maxGenerationAttempts && needsRetry(draft); attempt++ {
+		log.Printf("generation: draft needs retry (attempt %d/%d): malformed=%v emptyTitle=%v emptyTags=%v",
+			attempt, maxGenerationAttempts-1, looksMalformed(draft), draft.Title == "", len(draft.Tags) == 0)
+		draft, err = o.llm.Generate(ctx, llmInput)
+		if err != nil {
+			return Output{}, fmt.Errorf("generation: generating content (retry %d): %w", attempt, err)
+		}
+	}
+	// Sanitize unconditionally, whether or not a retry happened: the retry
+	// reduces how often this leaks, but doesn't guarantee a clean response,
+	// so this is the deterministic backstop that always runs.
+	draft = sanitizeDraft(draft)
+
 	violations := rules.Validate(toGeneratedContent(draft))
 
 	if len(violations) > 0 {
+		log.Printf("generation: initial draft violated rules, repairing: %v", violations)
 		repaired, err := o.llm.Repair(ctx, draft, violations)
 		if err != nil {
 			return Output{}, fmt.Errorf("generation: repairing content: %w", err)
 		}
-		draft = repaired
+		draft = sanitizeDraft(repaired)
 		violations = rules.Validate(toGeneratedContent(draft))
+		if len(violations) > 0 {
+			log.Printf("generation: repair did not resolve all violations, forcing compliance: %v", violations)
+		}
 	}
 
 	var warnings []string
@@ -114,6 +142,73 @@ func (o *Orchestrator) Generate(ctx context.Context, input Input) (Output, error
 		RelatedVideos: related,
 		Warnings:      warnings,
 	}, nil
+}
+
+// looksMalformed detects a rare Claude generation glitch where internal
+// tool-call formatting syntax (e.g. "<parameter name=...>") leaks into a
+// field's text content instead of being parsed into a clean tool_use block.
+// This corruption doesn't necessarily violate any YouTube rule (a garbled
+// title can still be short), so it needs its own check rather than relying
+// on rules.Validate.
+func looksMalformed(draft claude.ContentDraft) bool {
+	const corruptionMarker = "<parameter"
+
+	textFields := []string{draft.Title, draft.Hook, draft.Body, draft.Timestamps, draft.LinksSection, draft.MentionsSection}
+	for _, f := range textFields {
+		if strings.Contains(f, corruptionMarker) {
+			return true
+		}
+	}
+	for _, tag := range draft.Tags {
+		if strings.Contains(tag, corruptionMarker) {
+			return true
+		}
+	}
+	for _, tag := range draft.Hashtags {
+		if strings.Contains(tag, corruptionMarker) {
+			return true
+		}
+	}
+	return false
+}
+
+// corruptionTagPattern matches leaked tool-call syntax fragments regardless
+// of surrounding garbage bytes (observed once with a stray unicode character
+// inside the tag name), by matching any "<...>" span that mentions "antml"
+// or "parameter" anywhere inside it.
+var corruptionTagPattern = regexp.MustCompile(`<[^>]*(?:antml|parameter)[^>]*>`)
+
+func sanitize(s string) string {
+	return strings.TrimSpace(corruptionTagPattern.ReplaceAllString(s, ""))
+}
+
+// sanitizeDraft strips leaked tool-call syntax from every text field, as a
+// deterministic backstop that runs regardless of whether looksMalformed
+// triggered a retry — a retry reduces how often the corruption appears, but
+// doesn't guarantee the replacement response is clean.
+func sanitizeDraft(draft claude.ContentDraft) claude.ContentDraft {
+	draft.Title = sanitize(draft.Title)
+	draft.Hook = sanitize(draft.Hook)
+	draft.Body = sanitize(draft.Body)
+	draft.Timestamps = sanitize(draft.Timestamps)
+	draft.LinksSection = sanitize(draft.LinksSection)
+	draft.MentionsSection = sanitize(draft.MentionsSection)
+	for i, tag := range draft.Tags {
+		draft.Tags[i] = sanitize(tag)
+	}
+	for i, tag := range draft.Hashtags {
+		draft.Hashtags[i] = sanitize(tag)
+	}
+	return draft
+}
+
+// needsRetry reports whether a draft is broken enough to be worth
+// re-generating rather than repairing: leaked tool-call syntax, or an empty
+// title/tags array — both indicate the model produced a schema-valid but
+// unusable response, which the repair loop can't help with (repair fixes
+// rule violations, not missing content).
+func needsRetry(draft claude.ContentDraft) bool {
+	return looksMalformed(draft) || draft.Title == "" || len(draft.Tags) == 0
 }
 
 func toGeneratedContent(draft claude.ContentDraft) rules.GeneratedContent {

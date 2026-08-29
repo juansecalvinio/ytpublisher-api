@@ -43,7 +43,8 @@ func buildGeneratePrompt(input GenerateInput) (string, error) {
 	if len(relatedTitles) > 0 {
 		b.WriteString(fmt.Sprintf("\nFor context only (do not invent a related videos list — that is handled separately), the channel's most relevant existing videos on this topic are: %s\n", strings.Join(relatedTitles, "; ")))
 	}
-	b.WriteString("\nThe hook must be under 125 characters and be the literal opening of the description. Only fill links_section or mentions_section if links or mentions were provided above; otherwise leave them as empty strings.")
+	b.WriteString("\nThe hook must be under 125 characters and be the literal opening of the description.")
+	b.WriteString("\nlinks_section, mentions_section, and timestamps are optional fields: only include a given one in your response at all if it's actually applicable (links/mentions were provided above, or the video naturally has timestamped segments). If a field isn't applicable, omit that key from your response entirely — do not include it as an empty string.")
 	b.WriteString("\nAlways include at least 3 relevant tags in the tags array — never leave it empty.")
 
 	return b.String(), nil

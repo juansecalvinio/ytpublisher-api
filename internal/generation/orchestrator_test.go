@@ -29,11 +29,17 @@ func (f *fakeRelatedVideosFinder) FindRelated(ctx context.Context, channelID, to
 
 type fakeContentGenerator struct {
 	generateResult claude.ContentDraft
-	repairResult   claude.ContentDraft
-	repairCalls    int
+	firstGenerateResult *claude.ContentDraft // if set, returned only on the first Generate() call
+	generateCalls       int
+	repairResult        claude.ContentDraft
+	repairCalls         int
 }
 
 func (f *fakeContentGenerator) Generate(ctx context.Context, input claude.GenerateInput) (claude.ContentDraft, error) {
+	f.generateCalls++
+	if f.generateCalls == 1 && f.firstGenerateResult != nil {
+		return *f.firstGenerateResult, nil
+	}
 	return f.generateResult, nil
 }
 
@@ -127,5 +133,49 @@ func TestGenerate_ForcesComplianceWhenRepairStillFails(t *testing.T) {
 	}
 	if len(output.Warnings) == 0 {
 		t.Error("Warnings = none, want at least one warning about the forced truncation")
+	}
+}
+
+func TestGenerate_RetriesOnceWhenDraftLooksMalformed(t *testing.T) {
+	malformed := validDraft()
+	malformed.Title = "placeholder"
+	malformed.Body = `Some text <parameter name="title">oops</parameter>`
+
+	good := validDraft()
+
+	llm := &fakeContentGenerator{
+		firstGenerateResult: &malformed,
+		generateResult:      good,
+	}
+	orchestrator := NewOrchestrator(&fakeStyleProvider{}, &fakeRelatedVideosFinder{}, llm)
+
+	output, err := orchestrator.Generate(context.Background(), Input{ChannelID: "UC123", Topic: "Go basics"})
+	if err != nil {
+		t.Fatalf("Generate() returned unexpected error: %v", err)
+	}
+	if llm.generateCalls != 2 {
+		t.Errorf("generateCalls = %d, want 2 (one retry after detecting corruption)", llm.generateCalls)
+	}
+	if output.Title != good.Title {
+		t.Errorf("Title = %q, want the retried good draft's title %q", output.Title, good.Title)
+	}
+}
+
+func TestGenerate_SanitizesLeakedToolSyntaxEvenWhenRetryIsAlsoMalformed(t *testing.T) {
+	malformed := validDraft()
+	malformed.Body = `Some text </antml_parameter>\n<parameter name="title">oops</parameter> more text`
+
+	llm := &fakeContentGenerator{
+		firstGenerateResult: &malformed,
+		generateResult:      malformed, // the retry also comes back malformed
+	}
+	orchestrator := NewOrchestrator(&fakeStyleProvider{}, &fakeRelatedVideosFinder{}, llm)
+
+	output, err := orchestrator.Generate(context.Background(), Input{ChannelID: "UC123", Topic: "Go basics"})
+	if err != nil {
+		t.Fatalf("Generate() returned unexpected error: %v", err)
+	}
+	if strings.Contains(output.Description, "parameter") || strings.Contains(output.Description, "antml") {
+		t.Errorf("Description = %q, want leaked tool-call syntax stripped even after a persistently malformed retry", output.Description)
 	}
 }

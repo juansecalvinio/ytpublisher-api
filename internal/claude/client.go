@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/juansecalvinio/ytpublisher-api/internal/rules"
 	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
 	"github.com/juansecalvinio/ytpublisher-api/internal/styleanalysis"
@@ -73,13 +74,18 @@ func (c *Client) call(ctx context.Context, prompt string) (ContentDraft, error) 
 				"title":            map[string]any{"type": "string"},
 				"hook":             map[string]any{"type": "string", "description": "The opening hook, must be a short attention-grabbing line under 125 characters"},
 				"body":             map[string]any{"type": "string"},
-				"timestamps":       map[string]any{"type": "string"},
-				"links_section":    map[string]any{"type": "string"},
-				"mentions_section": map[string]any{"type": "string"},
+				"timestamps":       map[string]any{"type": "string", "description": "Only include this key at all if the video naturally has timestamped segments; omit the key entirely otherwise — never emit it as an empty string"},
+				"links_section":    map[string]any{"type": "string", "description": "Only include this key at all if links were provided; omit the key entirely otherwise — never emit it as an empty string"},
+				"mentions_section": map[string]any{"type": "string", "description": "Only include this key at all if mentions were provided; omit the key entirely otherwise — never emit it as an empty string"},
 				"hashtags":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 				"tags":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 			},
-			Required: []string{"title", "hook", "body", "timestamps", "links_section", "mentions_section", "hashtags", "tags"},
+			// timestamps/links_section/mentions_section are deliberately NOT
+			// required: a rare Claude generation glitch was observed where
+			// being forced to emit an empty string for one of these leaked
+			// tool-call formatting syntax into the value instead. Making them
+			// optional (omittable) avoids ever asking for an empty string.
+			Required: []string{"title", "hook", "body", "hashtags", "tags"},
 			ExtraFields: map[string]any{
 				"additionalProperties": false,
 			},
@@ -87,11 +93,26 @@ func (c *Client) call(ctx context.Context, prompt string) (ContentDraft, error) 
 		Strict: anthropic.Bool(true),
 	}
 
+	// DisableParallelToolUse is critical here: without it, Claude sometimes
+	// calls this same tool multiple times in one response (observed 3 calls
+	// in a single turn), where earlier calls can come back with corrupted
+	// leaked tool-call syntax and only a later call is clean. Our code only
+	// looks at the first tool_use block, so a parallel call could silently
+	// hand us a garbled draft even though a clean one was generated moments
+	// later in the same response. Forcing a single call removes that risk
+	// entirely, rather than trying to pick "the best" of several calls.
+	toolChoice := anthropic.ToolChoiceUnionParam{
+		OfTool: &anthropic.ToolChoiceToolParam{
+			Name:                   toolName,
+			DisableParallelToolUse: param.NewOpt(true),
+		},
+	}
+
 	resp, err := c.anthropic.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:      c.model,
 		MaxTokens:  4096,
 		Tools:      []anthropic.ToolUnionParam{{OfTool: &tool}},
-		ToolChoice: anthropic.ToolChoiceParamOfTool(toolName),
+		ToolChoice: toolChoice,
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
 		},
