@@ -43,6 +43,47 @@ func (f *fakeRelatedVideosProvider) FindRelated(ctx context.Context, channelID, 
 	return f.videos, f.err
 }
 
+type fakeCheckoutSessionCreator struct {
+	url string
+	err error
+}
+
+func (f *fakeCheckoutSessionCreator) CreateCheckoutSession(ctx context.Context, priceID, successURL, cancelURL string) (string, error) {
+	return f.url, f.err
+}
+
+func TestBillingSignup_RedirectsToCheckoutURL(t *testing.T) {
+	creator := &fakeCheckoutSessionCreator{url: "https://checkout.stripe.com/test-session"}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/billing/signup", nil)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{
+		CheckoutCreator:      creator,
+		StripeMeteredPriceID: "price_123",
+		BillingSuccessURL:    "http://localhost:8081/v1/billing/success",
+		BillingCancelURL:     "http://localhost:8081/v1/billing/cancel",
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusSeeOther)
+	}
+	if got := rec.Header().Get("Location"); got != creator.url {
+		t.Errorf("Location = %q, want %q", got, creator.url)
+	}
+}
+
+func TestBillingSuccess_ReturnsOK(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/billing/success", nil)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
 func TestHealthz_ReturnsOK(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()

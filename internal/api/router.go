@@ -8,17 +8,24 @@ import (
 )
 
 type Dependencies struct {
-	Finder        ClientFinder
-	Recorder      UsageRecorder
-	Syncer        ChannelSyncer
-	StyleProvider StyleProvider
-	RelatedVideos RelatedVideosProvider
-	Generator     GenerationOrchestrator
+	Finder               ClientFinder
+	Recorder             UsageRecorder
+	Syncer               ChannelSyncer
+	StyleProvider        StyleProvider
+	RelatedVideos        RelatedVideosProvider
+	Generator            GenerationOrchestrator
+	CheckoutCreator      CheckoutSessionCreator
+	StripeMeteredPriceID string
+	BillingSuccessURL    string
+	BillingCancelURL     string
 }
 
 func NewRouter(deps Dependencies) *chi.Mux {
 	r := chi.NewRouter()
 	r.Get("/healthz", handleHealthz)
+	r.Get("/v1/billing/signup", handleBillingSignup(deps.CheckoutCreator, deps.StripeMeteredPriceID, deps.BillingSuccessURL, deps.BillingCancelURL))
+	r.Get("/v1/billing/success", handleBillingSuccess)
+	r.Get("/v1/billing/cancel", handleBillingCancel)
 
 	r.Group(func(r chi.Router) {
 		r.Use(RequireAPIKey(deps.Finder, deps.Recorder))
