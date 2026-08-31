@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/stripe/stripe-go/v86"
 )
 
 func testCredentials(t *testing.T) (secretKey, priceID string) {
@@ -27,5 +29,27 @@ func TestCreateCheckoutSession_ReturnsHostedURL(t *testing.T) {
 	}
 	if !strings.HasPrefix(url, "https://checkout.stripe.com/") {
 		t.Errorf("url = %q, want prefix %q", url, "https://checkout.stripe.com/")
+	}
+}
+
+func TestReportUsage_Succeeds(t *testing.T) {
+	secretKey, _ := testCredentials(t)
+	client := NewClient(secretKey)
+	ctx := context.Background()
+
+	customer, err := client.sc.V1Customers.Create(ctx, &stripe.CustomerCreateParams{
+		Email: stripe.String("session8-test@example.com"),
+	})
+	if err != nil {
+		t.Fatalf("failed to create test customer: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := client.sc.V1Customers.Delete(context.Background(), customer.ID, nil); err != nil {
+			t.Errorf("cleanup: failed to delete test customer: %v", err)
+		}
+	})
+
+	if err := client.ReportUsage(ctx, customer.ID); err != nil {
+		t.Errorf("ReportUsage() returned unexpected error: %v", err)
 	}
 }

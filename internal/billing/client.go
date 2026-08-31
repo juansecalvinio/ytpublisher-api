@@ -29,3 +29,17 @@ func (c *Client) CreateCheckoutSession(ctx context.Context, priceID, successURL,
 	}
 	return session.URL, nil
 }
+
+const meterEventName = "ytpublisher_generate_request"
+
+func (c *Client) ReportUsage(ctx context.Context, stripeCustomerID string) error {
+	params := &stripe.BillingMeterEventCreateParams{
+		EventName: stripe.String(meterEventName),
+		Payload: map[string]string{
+			"stripe_customer_id": stripeCustomerID,
+			"value":              "1",
+		},
+	}
+	_, err := c.sc.V1BillingMeterEvents.Create(ctx, params)
+	return err
+}
