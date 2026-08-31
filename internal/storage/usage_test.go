@@ -9,7 +9,7 @@ func TestInsertUsageEvent_Succeeds(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	client, err := store.CreateClient(ctx, "Usage Test Client", "usage-test@example.com", randomHash(t))
+	client, err := store.CreateClient(ctx, "Usage Test Client", "usage-test@example.com", randomHash(t), "")
 	if err != nil {
 		t.Fatalf("CreateClient() returned unexpected error: %v", err)
 	}
