@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/juansecalvinio/ytpublisher-api/internal/api"
 	"github.com/juansecalvinio/ytpublisher-api/internal/channelsync"
 	"github.com/juansecalvinio/ytpublisher-api/internal/claude"
@@ -21,6 +22,11 @@ import (
 const maxVideosPerChannel = 25
 
 func main() {
+	// .env is only present in local dev; in production the real
+	// environment variables are set directly (systemd), so a missing
+	// file here is expected and not an error.
+	_ = godotenv.Load()
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
