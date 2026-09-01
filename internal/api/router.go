@@ -15,7 +15,10 @@ type Dependencies struct {
 	RelatedVideos        RelatedVideosProvider
 	Generator            GenerationOrchestrator
 	CheckoutCreator      CheckoutSessionCreator
+	ClientProvisioner    ClientProvisioner
+	KeyMailer            KeyMailer
 	StripeMeteredPriceID string
+	StripeWebhookSecret  string
 	BillingSuccessURL    string
 	BillingCancelURL     string
 }
@@ -26,6 +29,7 @@ func NewRouter(deps Dependencies) *chi.Mux {
 	r.Get("/v1/billing/signup", handleBillingSignup(deps.CheckoutCreator, deps.StripeMeteredPriceID, deps.BillingSuccessURL, deps.BillingCancelURL))
 	r.Get("/v1/billing/success", handleBillingSuccess)
 	r.Get("/v1/billing/cancel", handleBillingCancel)
+	r.Post("/v1/stripe/webhook", handleStripeWebhook(deps.ClientProvisioner, deps.KeyMailer, deps.StripeWebhookSecret))
 
 	r.Group(func(r chi.Router) {
 		r.Use(RequireAPIKey(deps.Finder, deps.Recorder))
