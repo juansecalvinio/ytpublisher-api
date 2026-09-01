@@ -505,3 +505,59 @@ func TestGenerate_ReturnsUnauthorizedWithoutKey(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
+
+type fakeUsageReporter struct {
+	reportedFor []string
+	err         error
+}
+
+func (f *fakeUsageReporter) ReportUsage(ctx context.Context, stripeCustomerID string) error {
+	f.reportedFor = append(f.reportedFor, stripeCustomerID)
+	return f.err
+}
+
+func TestGenerate_ReportsUsageForClientWithStripeCustomerID(t *testing.T) {
+	validKey := "ytpub_generatekey2"
+	client := storage.Client{ID: "client-2", Name: "Acme", Email: "a@acme.com", IsActive: true, StripeCustomerID: "cus_billed"}
+	finder := &fakeClientFinder{clientsByHash: map[string]storage.Client{apikey.Hash(validKey): client}}
+	reporter := &fakeUsageReporter{}
+	orchestrator := &fakeGenerationOrchestrator{output: generation.Output{Title: "T"}}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/generate", strings.NewReader(`{"channel_id":"UC1","topic":"t"}`))
+	req.Header.Set("Authorization", "Bearer "+validKey)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{
+		Finder: finder, Recorder: &fakeUsageRecorder{}, Generator: orchestrator, UsageReporter: reporter,
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(reporter.reportedFor) != 1 || reporter.reportedFor[0] != "cus_billed" {
+		t.Errorf("reportedFor = %v, want [cus_billed]", reporter.reportedFor)
+	}
+}
+
+func TestGenerate_SkipsUsageReportingForClientWithoutStripeCustomerID(t *testing.T) {
+	validKey := "ytpub_generatekey3"
+	client := storage.Client{ID: "client-3", Name: "Manual", Email: "m@example.com", IsActive: true, StripeCustomerID: ""}
+	finder := &fakeClientFinder{clientsByHash: map[string]storage.Client{apikey.Hash(validKey): client}}
+	reporter := &fakeUsageReporter{}
+	orchestrator := &fakeGenerationOrchestrator{output: generation.Output{Title: "T"}}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/generate", strings.NewReader(`{"channel_id":"UC1","topic":"t"}`))
+	req.Header.Set("Authorization", "Bearer "+validKey)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{
+		Finder: finder, Recorder: &fakeUsageRecorder{}, Generator: orchestrator, UsageReporter: reporter,
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(reporter.reportedFor) != 0 {
+		t.Errorf("reportedFor = %v, want none (manually-issued client has no Stripe customer)", reporter.reportedFor)
+	}
+}
