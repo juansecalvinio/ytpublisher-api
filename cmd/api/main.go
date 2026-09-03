@@ -8,9 +8,11 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/juansecalvinio/ytpublisher-api/internal/api"
+	"github.com/juansecalvinio/ytpublisher-api/internal/billing"
 	"github.com/juansecalvinio/ytpublisher-api/internal/channelsync"
 	"github.com/juansecalvinio/ytpublisher-api/internal/claude"
 	"github.com/juansecalvinio/ytpublisher-api/internal/config"
+	"github.com/juansecalvinio/ytpublisher-api/internal/email"
 	"github.com/juansecalvinio/ytpublisher-api/internal/embeddings"
 	"github.com/juansecalvinio/ytpublisher-api/internal/generation"
 	"github.com/juansecalvinio/ytpublisher-api/internal/relatedvideos"
@@ -57,13 +59,24 @@ func main() {
 	claudeClient := claude.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicModel)
 	generator := generation.NewOrchestrator(styleProvider, relatedVideosProvider, claudeClient)
 
+	billingClient := billing.NewClient(cfg.StripeSecretKey)
+	emailClient := email.NewClient(cfg.ResendAPIKey, cfg.ResendFromEmail)
+
 	router := api.NewRouter(api.Dependencies{
-		Finder:        store,
-		Recorder:      store,
-		Syncer:        syncer,
-		StyleProvider: styleProvider,
-		RelatedVideos: relatedVideosProvider,
-		Generator:     generator,
+		Finder:               store,
+		Recorder:             store,
+		Syncer:               syncer,
+		StyleProvider:        styleProvider,
+		RelatedVideos:        relatedVideosProvider,
+		Generator:            generator,
+		CheckoutCreator:      billingClient,
+		ClientProvisioner:    store,
+		KeyMailer:            emailClient,
+		UsageReporter:        billingClient,
+		StripeMeteredPriceID: cfg.StripeMeteredPriceID,
+		StripeWebhookSecret:  cfg.StripeWebhookSecret,
+		BillingSuccessURL:    cfg.PublicBaseURL + "/v1/billing/success",
+		BillingCancelURL:     cfg.PublicBaseURL + "/v1/billing/cancel",
 	})
 
 	log.Printf("listening on :%s", cfg.Port)
