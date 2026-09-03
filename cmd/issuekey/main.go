@@ -38,7 +38,7 @@ func main() {
 	}
 
 	store := storage.NewStore(pool)
-	client, err := store.CreateClient(ctx, *name, *email, apikey.Hash(plainKey))
+	client, err := store.CreateClient(ctx, *name, *email, apikey.Hash(plainKey), "")
 	if err != nil {
 		log.Fatalf("create client: %v", err)
 	}

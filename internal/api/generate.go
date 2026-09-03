@@ -13,6 +13,10 @@ type GenerationOrchestrator interface {
 	Generate(ctx context.Context, input generation.Input) (generation.Output, error)
 }
 
+type UsageReporter interface {
+	ReportUsage(ctx context.Context, stripeCustomerID string) error
+}
+
 type generateRequest struct {
 	ChannelID string   `json:"channel_id"`
 	Topic     string   `json:"topic"`
@@ -23,7 +27,7 @@ type generateRequest struct {
 	Tone      string   `json:"tone"`
 }
 
-func handleGenerate(orchestrator GenerationOrchestrator) http.HandlerFunc {
+func handleGenerate(orchestrator GenerationOrchestrator, reporter UsageReporter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req generateRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -48,6 +52,14 @@ func handleGenerate(orchestrator GenerationOrchestrator) http.HandlerFunc {
 			log.Printf("generate: %v", err)
 			writeJSONError(w, http.StatusInternalServerError, "failed to generate content")
 			return
+		}
+
+		if client, ok := ClientFromContext(r.Context()); ok && client.StripeCustomerID != "" {
+			if err := reporter.ReportUsage(r.Context(), client.StripeCustomerID); err != nil {
+				// The customer already has their content; a billing report
+				// failure shouldn't turn into a failed request for them.
+				log.Printf("generate: failed to report usage for %s: %v", client.StripeCustomerID, err)
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")

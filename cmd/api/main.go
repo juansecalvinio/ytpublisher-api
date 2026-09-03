@@ -6,10 +6,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/juansecalvinio/ytpublisher-api/internal/api"
+	"github.com/juansecalvinio/ytpublisher-api/internal/billing"
 	"github.com/juansecalvinio/ytpublisher-api/internal/channelsync"
 	"github.com/juansecalvinio/ytpublisher-api/internal/claude"
 	"github.com/juansecalvinio/ytpublisher-api/internal/config"
+	"github.com/juansecalvinio/ytpublisher-api/internal/email"
 	"github.com/juansecalvinio/ytpublisher-api/internal/embeddings"
 	"github.com/juansecalvinio/ytpublisher-api/internal/generation"
 	"github.com/juansecalvinio/ytpublisher-api/internal/relatedvideos"
@@ -21,6 +24,11 @@ import (
 const maxVideosPerChannel = 25
 
 func main() {
+	// .env is only present in local dev; in production the real
+	// environment variables are set directly (systemd), so a missing
+	// file here is expected and not an error.
+	_ = godotenv.Load()
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
@@ -51,13 +59,24 @@ func main() {
 	claudeClient := claude.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicModel)
 	generator := generation.NewOrchestrator(styleProvider, relatedVideosProvider, claudeClient)
 
+	billingClient := billing.NewClient(cfg.StripeSecretKey)
+	emailClient := email.NewClient(cfg.ResendAPIKey, cfg.ResendFromEmail)
+
 	router := api.NewRouter(api.Dependencies{
-		Finder:        store,
-		Recorder:      store,
-		Syncer:        syncer,
-		StyleProvider: styleProvider,
-		RelatedVideos: relatedVideosProvider,
-		Generator:     generator,
+		Finder:               store,
+		Recorder:             store,
+		Syncer:               syncer,
+		StyleProvider:        styleProvider,
+		RelatedVideos:        relatedVideosProvider,
+		Generator:            generator,
+		CheckoutCreator:      billingClient,
+		ClientProvisioner:    store,
+		KeyMailer:            emailClient,
+		UsageReporter:        billingClient,
+		StripeMeteredPriceID: cfg.StripeMeteredPriceID,
+		StripeWebhookSecret:  cfg.StripeWebhookSecret,
+		BillingSuccessURL:    cfg.PublicBaseURL + "/v1/billing/success",
+		BillingCancelURL:     cfg.PublicBaseURL + "/v1/billing/cancel",
 	})
 
 	log.Printf("listening on :%s", cfg.Port)

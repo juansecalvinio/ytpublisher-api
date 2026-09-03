@@ -15,6 +15,12 @@ func setRequiredEnv(t *testing.T) {
 	t.Setenv("VOYAGE_MODEL", "")
 	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
 	t.Setenv("ANTHROPIC_MODEL", "")
+	t.Setenv("STRIPE_SECRET_KEY", "sk_test_dummy")
+	t.Setenv("STRIPE_WEBHOOK_SECRET", "whsec_dummy")
+	t.Setenv("STRIPE_METERED_PRICE_ID", "price_dummy")
+	t.Setenv("RESEND_API_KEY", "re_dummy")
+	t.Setenv("RESEND_FROM_EMAIL", "")
+	t.Setenv("PUBLIC_BASE_URL", "http://localhost:8081")
 }
 
 func TestLoad_UsesDefaultPortWhenUnset(t *testing.T) {
@@ -213,5 +219,80 @@ func TestLoad_ReadsCustomAnthropicModel(t *testing.T) {
 	}
 	if cfg.AnthropicModel != "claude-opus-5" {
 		t.Errorf("AnthropicModel = %q, want %q", cfg.AnthropicModel, "claude-opus-5")
+	}
+}
+
+func TestLoad_ErrorsWhenStripeSecretKeyMissing(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("STRIPE_SECRET_KEY", "")
+
+	_, err := Load()
+	if !errors.Is(err, ErrMissingStripeSecretKey) {
+		t.Errorf("err = %v, want ErrMissingStripeSecretKey", err)
+	}
+}
+
+func TestLoad_ErrorsWhenStripeWebhookSecretMissing(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("STRIPE_WEBHOOK_SECRET", "")
+
+	_, err := Load()
+	if !errors.Is(err, ErrMissingStripeWebhookSecret) {
+		t.Errorf("err = %v, want ErrMissingStripeWebhookSecret", err)
+	}
+}
+
+func TestLoad_ErrorsWhenStripeMeteredPriceIDMissing(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("STRIPE_METERED_PRICE_ID", "")
+
+	_, err := Load()
+	if !errors.Is(err, ErrMissingStripeMeteredPriceID) {
+		t.Errorf("err = %v, want ErrMissingStripeMeteredPriceID", err)
+	}
+}
+
+func TestLoad_ErrorsWhenResendAPIKeyMissing(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("RESEND_API_KEY", "")
+
+	_, err := Load()
+	if !errors.Is(err, ErrMissingResendAPIKey) {
+		t.Errorf("err = %v, want ErrMissingResendAPIKey", err)
+	}
+}
+
+func TestLoad_UsesDefaultResendFromEmailWhenUnset(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.ResendFromEmail != "onboarding@resend.dev" {
+		t.Errorf("ResendFromEmail = %q, want %q", cfg.ResendFromEmail, "onboarding@resend.dev")
+	}
+}
+
+func TestLoad_ReadsCustomResendFromEmail(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("RESEND_FROM_EMAIL", "billing@ytpublisher.example")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.ResendFromEmail != "billing@ytpublisher.example" {
+		t.Errorf("ResendFromEmail = %q, want %q", cfg.ResendFromEmail, "billing@ytpublisher.example")
+	}
+}
+
+func TestLoad_ErrorsWhenPublicBaseURLMissing(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("PUBLIC_BASE_URL", "")
+
+	_, err := Load()
+	if !errors.Is(err, ErrMissingPublicBaseURL) {
+		t.Errorf("err = %v, want ErrMissingPublicBaseURL", err)
 	}
 }
