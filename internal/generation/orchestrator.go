@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/juansecalvinio/ytpublisher-api/internal/claude"
+	"github.com/juansecalvinio/ytpublisher-api/internal/relatedvideos"
 	"github.com/juansecalvinio/ytpublisher-api/internal/rules"
 	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
 	"github.com/juansecalvinio/ytpublisher-api/internal/styleanalysis"
@@ -18,12 +19,12 @@ type StyleProvider interface {
 }
 
 type RelatedVideosFinder interface {
-	FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, error)
+	FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, relatedvideos.Usage, error)
 }
 
 type ContentGenerator interface {
-	Generate(ctx context.Context, input claude.GenerateInput) (claude.ContentDraft, error)
-	Repair(ctx context.Context, draft claude.ContentDraft, violations []rules.Violation) (claude.ContentDraft, error)
+	Generate(ctx context.Context, input claude.GenerateInput) (claude.ContentDraft, claude.Usage, error)
+	Repair(ctx context.Context, draft claude.ContentDraft, violations []rules.Violation) (claude.ContentDraft, claude.Usage, error)
 }
 
 type Input struct {
@@ -41,12 +42,20 @@ type RelatedVideo struct {
 	Title   string
 }
 
+type Usage struct {
+	LLMInputTokens  int64
+	LLMOutputTokens int64
+	EmbeddingCalls  int
+	EmbeddingTokens int64
+}
+
 type Output struct {
 	Title         string
 	Description   string
 	Tags          []string
 	RelatedVideos []RelatedVideo
 	Warnings      []string
+	Usage         Usage
 }
 
 const relatedVideosLimit = 5
@@ -69,14 +78,18 @@ func NewOrchestrator(style StyleProvider, related RelatedVideosFinder, llm Conte
 }
 
 func (o *Orchestrator) Generate(ctx context.Context, input Input) (Output, error) {
+	var usage Usage
+
 	styleSummary, err := o.style.GetStyle(ctx, input.ChannelID)
 	if err != nil {
 		return Output{}, fmt.Errorf("generation: getting style: %w", err)
 	}
 
-	relatedVideos, err := o.related.FindRelated(ctx, input.ChannelID, input.Topic, relatedVideosLimit)
+	relatedVideos, relatedUsage, err := o.related.FindRelated(ctx, input.ChannelID, input.Topic, relatedVideosLimit)
+	usage.EmbeddingCalls += relatedUsage.EmbeddingCalls
+	usage.EmbeddingTokens += relatedUsage.EmbeddingTokens
 	if err != nil {
-		return Output{}, fmt.Errorf("generation: finding related videos: %w", err)
+		return Output{Usage: usage}, fmt.Errorf("generation: finding related videos: %w", err)
 	}
 
 	llmInput := claude.GenerateInput{
@@ -90,17 +103,21 @@ func (o *Orchestrator) Generate(ctx context.Context, input Input) (Output, error
 		RelatedVideos: relatedVideos,
 	}
 
-	draft, err := o.llm.Generate(ctx, llmInput)
+	draft, genUsage, err := o.llm.Generate(ctx, llmInput)
+	usage.LLMInputTokens += genUsage.InputTokens
+	usage.LLMOutputTokens += genUsage.OutputTokens
 	if err != nil {
-		return Output{}, fmt.Errorf("generation: generating content: %w", err)
+		return Output{Usage: usage}, fmt.Errorf("generation: generating content: %w", err)
 	}
 
 	for attempt := 1; attempt < maxGenerationAttempts && needsRetry(draft); attempt++ {
 		log.Printf("generation: draft needs retry (attempt %d/%d): malformed=%v emptyTitle=%v emptyTags=%v",
 			attempt, maxGenerationAttempts-1, looksMalformed(draft), draft.Title == "", len(draft.Tags) == 0)
-		draft, err = o.llm.Generate(ctx, llmInput)
+		draft, genUsage, err = o.llm.Generate(ctx, llmInput)
+		usage.LLMInputTokens += genUsage.InputTokens
+		usage.LLMOutputTokens += genUsage.OutputTokens
 		if err != nil {
-			return Output{}, fmt.Errorf("generation: generating content (retry %d): %w", attempt, err)
+			return Output{Usage: usage}, fmt.Errorf("generation: generating content (retry %d): %w", attempt, err)
 		}
 	}
 	// Sanitize unconditionally, whether or not a retry happened: the retry
@@ -112,9 +129,11 @@ func (o *Orchestrator) Generate(ctx context.Context, input Input) (Output, error
 
 	if len(violations) > 0 {
 		log.Printf("generation: initial draft violated rules, repairing: %v", violations)
-		repaired, err := o.llm.Repair(ctx, draft, violations)
+		repaired, repairUsage, err := o.llm.Repair(ctx, draft, violations)
+		usage.LLMInputTokens += repairUsage.InputTokens
+		usage.LLMOutputTokens += repairUsage.OutputTokens
 		if err != nil {
-			return Output{}, fmt.Errorf("generation: repairing content: %w", err)
+			return Output{Usage: usage}, fmt.Errorf("generation: repairing content: %w", err)
 		}
 		draft = sanitizeDraft(repaired)
 		violations = rules.Validate(toGeneratedContent(draft))
@@ -141,6 +160,7 @@ func (o *Orchestrator) Generate(ctx context.Context, input Input) (Output, error
 		Tags:          content.Tags,
 		RelatedVideos: related,
 		Warnings:      warnings,
+		Usage:         usage,
 	}, nil
 }
 
