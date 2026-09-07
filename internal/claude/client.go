@@ -49,23 +49,28 @@ func NewClient(apiKey, model string) *Client {
 	}
 }
 
-func (c *Client) Generate(ctx context.Context, input GenerateInput) (ContentDraft, error) {
+type Usage struct {
+	InputTokens  int64
+	OutputTokens int64
+}
+
+func (c *Client) Generate(ctx context.Context, input GenerateInput) (ContentDraft, Usage, error) {
 	prompt, err := buildGeneratePrompt(input)
 	if err != nil {
-		return ContentDraft{}, fmt.Errorf("claude: building prompt: %w", err)
+		return ContentDraft{}, Usage{}, fmt.Errorf("claude: building prompt: %w", err)
 	}
 	return c.call(ctx, prompt)
 }
 
-func (c *Client) Repair(ctx context.Context, draft ContentDraft, violations []rules.Violation) (ContentDraft, error) {
+func (c *Client) Repair(ctx context.Context, draft ContentDraft, violations []rules.Violation) (ContentDraft, Usage, error) {
 	prompt, err := buildRepairPrompt(draft, violations)
 	if err != nil {
-		return ContentDraft{}, fmt.Errorf("claude: building repair prompt: %w", err)
+		return ContentDraft{}, Usage{}, fmt.Errorf("claude: building repair prompt: %w", err)
 	}
 	return c.call(ctx, prompt)
 }
 
-func (c *Client) call(ctx context.Context, prompt string) (ContentDraft, error) {
+func (c *Client) call(ctx context.Context, prompt string) (ContentDraft, Usage, error) {
 	tool := anthropic.ToolParam{
 		Name:        toolName,
 		Description: anthropic.String("Emit the generated YouTube title, description parts, hashtags, and tags as structured data."),
@@ -118,17 +123,19 @@ func (c *Client) call(ctx context.Context, prompt string) (ContentDraft, error) 
 		},
 	})
 	if err != nil {
-		return ContentDraft{}, fmt.Errorf("claude: request failed: %w", err)
+		return ContentDraft{}, Usage{}, fmt.Errorf("claude: request failed: %w", err)
 	}
+
+	usage := Usage{InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens}
 
 	for _, block := range resp.Content {
 		if toolUse, ok := block.AsAny().(anthropic.ToolUseBlock); ok {
 			var draft ContentDraft
 			if err := json.Unmarshal([]byte(toolUse.JSON.Input.Raw()), &draft); err != nil {
-				return ContentDraft{}, fmt.Errorf("claude: parsing tool input: %w", err)
+				return ContentDraft{}, usage, fmt.Errorf("claude: parsing tool input: %w", err)
 			}
-			return draft, nil
+			return draft, usage, nil
 		}
 	}
-	return ContentDraft{}, fmt.Errorf("claude: response did not contain a tool_use block")
+	return ContentDraft{}, usage, fmt.Errorf("claude: response did not contain a tool_use block")
 }
