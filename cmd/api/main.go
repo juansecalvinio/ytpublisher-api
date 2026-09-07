@@ -15,6 +15,7 @@ import (
 	"github.com/juansecalvinio/ytpublisher-api/internal/email"
 	"github.com/juansecalvinio/ytpublisher-api/internal/embeddings"
 	"github.com/juansecalvinio/ytpublisher-api/internal/generation"
+	"github.com/juansecalvinio/ytpublisher-api/internal/ratelimit"
 	"github.com/juansecalvinio/ytpublisher-api/internal/relatedvideos"
 	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
 	"github.com/juansecalvinio/ytpublisher-api/internal/stylecache"
@@ -62,6 +63,8 @@ func main() {
 	billingClient := billing.NewClient(cfg.StripeSecretKey)
 	emailClient := email.NewClient(cfg.ResendAPIKey, cfg.ResendFromEmail)
 
+	rateLimiter := ratelimit.NewLimiter(cfg.RateLimitPerMinute, time.Minute)
+
 	router := api.NewRouter(api.Dependencies{
 		Finder:               store,
 		Recorder:             store,
@@ -73,6 +76,9 @@ func main() {
 		ClientProvisioner:    store,
 		KeyMailer:            emailClient,
 		UsageReporter:        billingClient,
+		RateLimiter:          rateLimiter,
+		DailyUsageLimiter:    store,
+		RateLimitPerDay:      cfg.RateLimitPerDay,
 		StripeMeteredPriceID: cfg.StripeMeteredPriceID,
 		StripeWebhookSecret:  cfg.StripeWebhookSecret,
 		BillingSuccessURL:    cfg.PublicBaseURL + "/v1/billing/success",
