@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/juansecalvinio/ytpublisher-api/internal/embeddings"
 	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
 )
 
@@ -14,8 +15,13 @@ type VideoStore interface {
 }
 
 type Embedder interface {
-	EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error)
-	EmbedQuery(ctx context.Context, text string) ([]float32, error)
+	EmbedDocuments(ctx context.Context, texts []string) ([][]float32, embeddings.Usage, error)
+	EmbedQuery(ctx context.Context, text string) ([]float32, embeddings.Usage, error)
+}
+
+type Usage struct {
+	EmbeddingCalls  int
+	EmbeddingTokens int64
 }
 
 type Provider struct {
@@ -27,10 +33,12 @@ func NewProvider(videos VideoStore, embedder Embedder) *Provider {
 	return &Provider{videos: videos, embedder: embedder}
 }
 
-func (p *Provider) FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, error) {
+func (p *Provider) FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, Usage, error) {
+	var usage Usage
+
 	videos, err := p.videos.ListChannelVideos(ctx, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("relatedvideos: listing videos: %w", err)
+		return nil, usage, fmt.Errorf("relatedvideos: listing videos: %w", err)
 	}
 
 	var missing []storage.ChannelVideo
@@ -45,25 +53,29 @@ func (p *Provider) FindRelated(ctx context.Context, channelID, topic string, lim
 		for i, v := range missing {
 			texts[i] = v.Title + "\n\n" + v.Description
 		}
-		newEmbeddings, err := p.embedder.EmbedDocuments(ctx, texts)
+		newEmbeddings, embedUsage, err := p.embedder.EmbedDocuments(ctx, texts)
+		usage.EmbeddingCalls++
+		usage.EmbeddingTokens += embedUsage.TotalTokens
 		if err != nil {
-			return nil, fmt.Errorf("relatedvideos: embedding videos: %w", err)
+			return nil, usage, fmt.Errorf("relatedvideos: embedding videos: %w", err)
 		}
 		for i, v := range missing {
 			if err := p.videos.UpdateChannelVideoEmbedding(ctx, channelID, v.VideoID, newEmbeddings[i]); err != nil {
-				return nil, fmt.Errorf("relatedvideos: storing embedding: %w", err)
+				return nil, usage, fmt.Errorf("relatedvideos: storing embedding: %w", err)
 			}
 		}
 	}
 
-	queryEmbedding, err := p.embedder.EmbedQuery(ctx, topic)
+	queryEmbedding, queryUsage, err := p.embedder.EmbedQuery(ctx, topic)
+	usage.EmbeddingCalls++
+	usage.EmbeddingTokens += queryUsage.TotalTokens
 	if err != nil {
-		return nil, fmt.Errorf("relatedvideos: embedding topic: %w", err)
+		return nil, usage, fmt.Errorf("relatedvideos: embedding topic: %w", err)
 	}
 
 	results, err := p.videos.FindSimilarVideos(ctx, channelID, queryEmbedding, limit)
 	if err != nil {
-		return nil, fmt.Errorf("relatedvideos: searching similar videos: %w", err)
+		return nil, usage, fmt.Errorf("relatedvideos: searching similar videos: %w", err)
 	}
-	return results, nil
+	return results, usage, nil
 }

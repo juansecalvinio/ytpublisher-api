@@ -7,11 +7,12 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/juansecalvinio/ytpublisher-api/internal/relatedvideos"
 	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
 )
 
 type RelatedVideosProvider interface {
-	FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, error)
+	FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, relatedvideos.Usage, error)
 }
 
 const defaultRelatedVideosLimit = 5
@@ -25,7 +26,7 @@ func handleRelatedVideos(provider RelatedVideosProvider) http.HandlerFunc {
 			return
 		}
 
-		videos, err := provider.FindRelated(r.Context(), channelID, topic, defaultRelatedVideosLimit)
+		videos, _, err := provider.FindRelated(r.Context(), channelID, topic, defaultRelatedVideosLimit)
 		if err != nil {
 			log.Printf("related videos: %v", err)
 			writeJSONError(w, http.StatusInternalServerError, "failed to find related videos")

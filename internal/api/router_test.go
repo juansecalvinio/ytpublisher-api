@@ -16,6 +16,7 @@ import (
 	"github.com/juansecalvinio/ytpublisher-api/internal/apikey"
 	"github.com/juansecalvinio/ytpublisher-api/internal/channelsync"
 	"github.com/juansecalvinio/ytpublisher-api/internal/generation"
+	"github.com/juansecalvinio/ytpublisher-api/internal/relatedvideos"
 	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
 	"github.com/juansecalvinio/ytpublisher-api/internal/styleanalysis"
 	"github.com/juansecalvinio/ytpublisher-api/internal/youtube"
@@ -44,8 +45,8 @@ type fakeRelatedVideosProvider struct {
 	err    error
 }
 
-func (f *fakeRelatedVideosProvider) FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, error) {
-	return f.videos, f.err
+func (f *fakeRelatedVideosProvider) FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, relatedvideos.Usage, error) {
+	return f.videos, relatedvideos.Usage{}, f.err
 }
 
 type fakeCheckoutSessionCreator struct {
