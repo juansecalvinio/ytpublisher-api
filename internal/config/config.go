@@ -22,6 +22,8 @@ type Config struct {
 	ResendAPIKey         string
 	ResendFromEmail      string
 	PublicBaseURL        string
+	RateLimitPerMinute   int
+	RateLimitPerDay      int
 }
 
 var (
@@ -36,6 +38,8 @@ var (
 	ErrMissingStripeMeteredPriceID = errors.New("config: STRIPE_METERED_PRICE_ID is required")
 	ErrMissingResendAPIKey         = errors.New("config: RESEND_API_KEY is required")
 	ErrMissingPublicBaseURL        = errors.New("config: PUBLIC_BASE_URL is required")
+	ErrInvalidRateLimitPerMinute   = errors.New("config: RATE_LIMIT_PER_MINUTE must be a positive integer")
+	ErrInvalidRateLimitPerDay      = errors.New("config: RATE_LIMIT_PER_DAY must be a positive integer")
 )
 
 const (
@@ -44,6 +48,8 @@ const (
 	defaultVoyageModel          = "voyage-3.5-lite"
 	defaultAnthropicModel       = "claude-sonnet-5"
 	defaultResendFromEmail      = "onboarding@resend.dev"
+	defaultRateLimitPerMinute   = 10
+	defaultRateLimitPerDay      = 200
 )
 
 func Load() (Config, error) {
@@ -126,6 +132,24 @@ func Load() (Config, error) {
 	cfg.PublicBaseURL = os.Getenv("PUBLIC_BASE_URL")
 	if cfg.PublicBaseURL == "" {
 		return Config{}, ErrMissingPublicBaseURL
+	}
+
+	cfg.RateLimitPerMinute = defaultRateLimitPerMinute
+	if raw := os.Getenv("RATE_LIMIT_PER_MINUTE"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit <= 0 {
+			return Config{}, ErrInvalidRateLimitPerMinute
+		}
+		cfg.RateLimitPerMinute = limit
+	}
+
+	cfg.RateLimitPerDay = defaultRateLimitPerDay
+	if raw := os.Getenv("RATE_LIMIT_PER_DAY"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit <= 0 {
+			return Config{}, ErrInvalidRateLimitPerDay
+		}
+		cfg.RateLimitPerDay = limit
 	}
 
 	return cfg, nil

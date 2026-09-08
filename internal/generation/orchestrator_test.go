@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/juansecalvinio/ytpublisher-api/internal/claude"
+	"github.com/juansecalvinio/ytpublisher-api/internal/relatedvideos"
 	"github.com/juansecalvinio/ytpublisher-api/internal/rules"
 	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
 	"github.com/juansecalvinio/ytpublisher-api/internal/styleanalysis"
@@ -21,31 +22,34 @@ func (f *fakeStyleProvider) GetStyle(ctx context.Context, channelID string) (sty
 
 type fakeRelatedVideosFinder struct {
 	videos []storage.ChannelVideo
+	usage  relatedvideos.Usage
 }
 
-func (f *fakeRelatedVideosFinder) FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, error) {
-	return f.videos, nil
+func (f *fakeRelatedVideosFinder) FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, relatedvideos.Usage, error) {
+	return f.videos, f.usage, nil
 }
 
 type fakeContentGenerator struct {
-	generateResult claude.ContentDraft
+	generateResult      claude.ContentDraft
 	firstGenerateResult *claude.ContentDraft // if set, returned only on the first Generate() call
+	generateUsage       claude.Usage
 	generateCalls       int
 	repairResult        claude.ContentDraft
+	repairUsage         claude.Usage
 	repairCalls         int
 }
 
-func (f *fakeContentGenerator) Generate(ctx context.Context, input claude.GenerateInput) (claude.ContentDraft, error) {
+func (f *fakeContentGenerator) Generate(ctx context.Context, input claude.GenerateInput) (claude.ContentDraft, claude.Usage, error) {
 	f.generateCalls++
 	if f.generateCalls == 1 && f.firstGenerateResult != nil {
-		return *f.firstGenerateResult, nil
+		return *f.firstGenerateResult, f.generateUsage, nil
 	}
-	return f.generateResult, nil
+	return f.generateResult, f.generateUsage, nil
 }
 
-func (f *fakeContentGenerator) Repair(ctx context.Context, draft claude.ContentDraft, violations []rules.Violation) (claude.ContentDraft, error) {
+func (f *fakeContentGenerator) Repair(ctx context.Context, draft claude.ContentDraft, violations []rules.Violation) (claude.ContentDraft, claude.Usage, error) {
 	f.repairCalls++
-	return f.repairResult, nil
+	return f.repairResult, f.repairUsage, nil
 }
 
 func validDraft() claude.ContentDraft {
@@ -177,5 +181,47 @@ func TestGenerate_SanitizesLeakedToolSyntaxEvenWhenRetryIsAlsoMalformed(t *testi
 	}
 	if strings.Contains(output.Description, "parameter") || strings.Contains(output.Description, "antml") {
 		t.Errorf("Description = %q, want leaked tool-call syntax stripped even after a persistently malformed retry", output.Description)
+	}
+}
+
+func TestGenerate_AccumulatesUsageAcrossRetryAndRepair(t *testing.T) {
+	malformed := validDraft()
+	malformed.Title = "" // triggers a retry (needsRetry: empty title)
+
+	badDraft := validDraft()
+	badDraft.Title = strings.Repeat("a", 101) // triggers repair (rule violation)
+
+	llm := &fakeContentGenerator{
+		firstGenerateResult: &malformed,
+		generateResult:      badDraft,
+		generateUsage:       claude.Usage{InputTokens: 100, OutputTokens: 50},
+		repairResult:        validDraft(),
+		repairUsage:         claude.Usage{InputTokens: 40, OutputTokens: 20},
+	}
+	related := &fakeRelatedVideosFinder{
+		usage: relatedvideos.Usage{EmbeddingCalls: 2, EmbeddingTokens: 30},
+	}
+	orchestrator := NewOrchestrator(&fakeStyleProvider{}, related, llm)
+
+	output, err := orchestrator.Generate(context.Background(), Input{ChannelID: "UC123", Topic: "Go basics"})
+	if err != nil {
+		t.Fatalf("Generate() returned unexpected error: %v", err)
+	}
+	if llm.generateCalls != 2 {
+		t.Fatalf("generateCalls = %d, want 2", llm.generateCalls)
+	}
+	if llm.repairCalls != 1 {
+		t.Fatalf("repairCalls = %d, want 1", llm.repairCalls)
+	}
+	// Two Generate() calls at (100 in, 50 out) each, plus one Repair() call
+	// at (40 in, 20 out): totals (240, 120).
+	wantUsage := Usage{
+		LLMInputTokens:  240,
+		LLMOutputTokens: 120,
+		EmbeddingCalls:  2,
+		EmbeddingTokens: 30,
+	}
+	if output.Usage != wantUsage {
+		t.Errorf("output.Usage = %+v, want %+v", output.Usage, wantUsage)
 	}
 }

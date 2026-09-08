@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/juansecalvinio/ytpublisher-api/internal/embeddings"
 	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
 )
 
@@ -34,18 +35,18 @@ type fakeEmbedder struct {
 	queryCalls    []string
 }
 
-func (f *fakeEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
+func (f *fakeEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, embeddings.Usage, error) {
 	f.documentCalls = append(f.documentCalls, texts)
 	result := make([][]float32, len(texts))
 	for i := range texts {
 		result[i] = []float32{float32(i)}
 	}
-	return result, nil
+	return result, embeddings.Usage{TotalTokens: int64(len(texts)) * 10}, nil
 }
 
-func (f *fakeEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
+func (f *fakeEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, embeddings.Usage, error) {
 	f.queryCalls = append(f.queryCalls, text)
-	return []float32{1}, nil
+	return []float32{1}, embeddings.Usage{TotalTokens: 5}, nil
 }
 
 func TestFindRelated_EmbedsOnlyMissingVideosBeforeSearching(t *testing.T) {
@@ -59,7 +60,7 @@ func TestFindRelated_EmbedsOnlyMissingVideosBeforeSearching(t *testing.T) {
 	embedder := &fakeEmbedder{}
 	provider := NewProvider(videoStore, embedder)
 
-	results, err := provider.FindRelated(context.Background(), "UC123", "some topic", 5)
+	results, usage, err := provider.FindRelated(context.Background(), "UC123", "some topic", 5)
 	if err != nil {
 		t.Fatalf("FindRelated() returned unexpected error: %v", err)
 	}
@@ -78,6 +79,13 @@ func TestFindRelated_EmbedsOnlyMissingVideosBeforeSearching(t *testing.T) {
 	if len(embedder.queryCalls) != 1 || embedder.queryCalls[0] != "some topic" {
 		t.Errorf("queryCalls = %v, want [\"some topic\"]", embedder.queryCalls)
 	}
+	// EmbedDocuments (1 text -> 10 tokens) + EmbedQuery (5 tokens) = 2 calls, 15 tokens.
+	if usage.EmbeddingCalls != 2 {
+		t.Errorf("usage.EmbeddingCalls = %d, want 2", usage.EmbeddingCalls)
+	}
+	if usage.EmbeddingTokens != 15 {
+		t.Errorf("usage.EmbeddingTokens = %d, want 15", usage.EmbeddingTokens)
+	}
 }
 
 func TestFindRelated_SkipsEmbeddingWhenAllVideosAlreadyEmbedded(t *testing.T) {
@@ -89,11 +97,18 @@ func TestFindRelated_SkipsEmbeddingWhenAllVideosAlreadyEmbedded(t *testing.T) {
 	embedder := &fakeEmbedder{}
 	provider := NewProvider(videoStore, embedder)
 
-	_, err := provider.FindRelated(context.Background(), "UC123", "some topic", 5)
+	_, usage, err := provider.FindRelated(context.Background(), "UC123", "some topic", 5)
 	if err != nil {
 		t.Fatalf("FindRelated() returned unexpected error: %v", err)
 	}
 	if len(embedder.documentCalls) != 0 {
 		t.Errorf("documentCalls = %v, want none (all videos already embedded)", embedder.documentCalls)
+	}
+	// Only EmbedQuery ran (5 tokens); EmbedDocuments was skipped entirely.
+	if usage.EmbeddingCalls != 1 {
+		t.Errorf("usage.EmbeddingCalls = %d, want 1 (only EmbedQuery ran)", usage.EmbeddingCalls)
+	}
+	if usage.EmbeddingTokens != 5 {
+		t.Errorf("usage.EmbeddingTokens = %d, want 5", usage.EmbeddingTokens)
 	}
 }

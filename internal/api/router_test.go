@@ -16,6 +16,7 @@ import (
 	"github.com/juansecalvinio/ytpublisher-api/internal/apikey"
 	"github.com/juansecalvinio/ytpublisher-api/internal/channelsync"
 	"github.com/juansecalvinio/ytpublisher-api/internal/generation"
+	"github.com/juansecalvinio/ytpublisher-api/internal/relatedvideos"
 	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
 	"github.com/juansecalvinio/ytpublisher-api/internal/styleanalysis"
 	"github.com/juansecalvinio/ytpublisher-api/internal/youtube"
@@ -44,8 +45,8 @@ type fakeRelatedVideosProvider struct {
 	err    error
 }
 
-func (f *fakeRelatedVideosProvider) FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, error) {
-	return f.videos, f.err
+func (f *fakeRelatedVideosProvider) FindRelated(ctx context.Context, channelID, topic string, limit int) ([]storage.ChannelVideo, relatedvideos.Usage, error) {
+	return f.videos, relatedvideos.Usage{}, f.err
 }
 
 type fakeCheckoutSessionCreator struct {
@@ -439,9 +440,11 @@ func TestRelatedVideos_ReturnsUnauthorizedWithoutKey(t *testing.T) {
 type fakeGenerationOrchestrator struct {
 	output generation.Output
 	err    error
+	calls  int
 }
 
 func (f *fakeGenerationOrchestrator) Generate(ctx context.Context, input generation.Input) (generation.Output, error) {
+	f.calls++
 	return f.output, f.err
 }
 
@@ -461,7 +464,10 @@ func TestGenerate_ReturnsGeneratedContentWithValidKey(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+validKey)
 	rec := httptest.NewRecorder()
 
-	NewRouter(Dependencies{Finder: finder, Recorder: recorder, Generator: orchestrator}).ServeHTTP(rec, req)
+	NewRouter(Dependencies{
+		Finder: finder, Recorder: recorder, Generator: orchestrator,
+		RateLimiter: &fakeMinuteLimiter{allow: true}, DailyUsageLimiter: &fakeDailyLimiter{count: 1}, RateLimitPerDay: 200,
+	}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -487,7 +493,10 @@ func TestGenerate_ReturnsBadRequestForMissingFields(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+validKey)
 	rec := httptest.NewRecorder()
 
-	NewRouter(Dependencies{Finder: finder, Recorder: recorder}).ServeHTTP(rec, req)
+	NewRouter(Dependencies{
+		Finder: finder, Recorder: recorder,
+		RateLimiter: &fakeMinuteLimiter{allow: true}, DailyUsageLimiter: &fakeDailyLimiter{count: 1}, RateLimitPerDay: 200,
+	}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
@@ -529,6 +538,7 @@ func TestGenerate_ReportsUsageForClientWithStripeCustomerID(t *testing.T) {
 
 	NewRouter(Dependencies{
 		Finder: finder, Recorder: &fakeUsageRecorder{}, Generator: orchestrator, UsageReporter: reporter,
+		RateLimiter: &fakeMinuteLimiter{allow: true}, DailyUsageLimiter: &fakeDailyLimiter{count: 1}, RateLimitPerDay: 200,
 	}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -552,6 +562,7 @@ func TestGenerate_SkipsUsageReportingForClientWithoutStripeCustomerID(t *testing
 
 	NewRouter(Dependencies{
 		Finder: finder, Recorder: &fakeUsageRecorder{}, Generator: orchestrator, UsageReporter: reporter,
+		RateLimiter: &fakeMinuteLimiter{allow: true}, DailyUsageLimiter: &fakeDailyLimiter{count: 1}, RateLimitPerDay: 200,
 	}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -559,5 +570,87 @@ func TestGenerate_SkipsUsageReportingForClientWithoutStripeCustomerID(t *testing
 	}
 	if len(reporter.reportedFor) != 0 {
 		t.Errorf("reportedFor = %v, want none (manually-issued client has no Stripe customer)", reporter.reportedFor)
+	}
+}
+
+func TestGenerate_ReturnsTooManyRequestsWhenPerMinuteLimitExceeded(t *testing.T) {
+	validKey := "ytpub_generatekey4"
+	client := storage.Client{ID: "client-4", Name: "Acme", Email: "a@acme.com", IsActive: true}
+	finder := &fakeClientFinder{clientsByHash: map[string]storage.Client{apikey.Hash(validKey): client}}
+	orchestrator := &fakeGenerationOrchestrator{output: generation.Output{Title: "T"}}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/generate", strings.NewReader(`{"channel_id":"UC1","topic":"t"}`))
+	req.Header.Set("Authorization", "Bearer "+validKey)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{
+		Finder: finder, Recorder: &fakeUsageRecorder{}, Generator: orchestrator,
+		RateLimiter: &fakeMinuteLimiter{allow: false}, DailyUsageLimiter: &fakeDailyLimiter{count: 1}, RateLimitPerDay: 200,
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+	}
+	if orchestrator.calls != 0 {
+		t.Errorf("orchestrator.calls = %d, want 0 (rejected before generation ran)", orchestrator.calls)
+	}
+}
+
+func TestGenerate_ReturnsTooManyRequestsWhenDailyCapExceeded(t *testing.T) {
+	validKey := "ytpub_generatekey5"
+	client := storage.Client{ID: "client-5", Name: "Acme", Email: "a@acme.com", IsActive: true}
+	finder := &fakeClientFinder{clientsByHash: map[string]storage.Client{apikey.Hash(validKey): client}}
+	orchestrator := &fakeGenerationOrchestrator{output: generation.Output{Title: "T"}}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/generate", strings.NewReader(`{"channel_id":"UC1","topic":"t"}`))
+	req.Header.Set("Authorization", "Bearer "+validKey)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{
+		Finder: finder, Recorder: &fakeUsageRecorder{}, Generator: orchestrator,
+		RateLimiter: &fakeMinuteLimiter{allow: true}, DailyUsageLimiter: &fakeDailyLimiter{count: 201}, RateLimitPerDay: 200,
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+	}
+	if orchestrator.calls != 0 {
+		t.Errorf("orchestrator.calls = %d, want 0 (rejected before generation ran)", orchestrator.calls)
+	}
+}
+
+func TestGenerate_RecordsRealCostOnSuccess(t *testing.T) {
+	validKey := "ytpub_generatekey6"
+	client := storage.Client{ID: "client-6", Name: "Acme", Email: "a@acme.com", IsActive: true}
+	finder := &fakeClientFinder{clientsByHash: map[string]storage.Client{apikey.Hash(validKey): client}}
+	recorder := &fakeUsageRecorder{}
+	orchestrator := &fakeGenerationOrchestrator{output: generation.Output{
+		Title: "T",
+		Usage: generation.Usage{LLMInputTokens: 1_000_000, LLMOutputTokens: 1_000_000, EmbeddingCalls: 2, EmbeddingTokens: 1_000_000},
+	}}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/generate", strings.NewReader(`{"channel_id":"UC1","topic":"t"}`))
+	req.Header.Set("Authorization", "Bearer "+validKey)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{
+		Finder: finder, Recorder: recorder, Generator: orchestrator,
+		RateLimiter: &fakeMinuteLimiter{allow: true}, DailyUsageLimiter: &fakeDailyLimiter{count: 1}, RateLimitPerDay: 200,
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(recorder.updatedEvents) != 1 {
+		t.Fatalf("len(updatedEvents) = %d, want 1", len(recorder.updatedEvents))
+	}
+	update := recorder.updatedEvents[0].update
+	if update.LLMInputTokens != 1_000_000 || update.LLMOutputTokens != 1_000_000 || update.EmbeddingCalls != 2 {
+		t.Errorf("update = %+v, want tokens/calls to match the orchestrator's output usage", update)
+	}
+	// $2/MTok in + $10/MTok out + $0.02/MTok embedding, each at exactly 1M tokens.
+	wantCost := 2.0 + 10.0 + 0.02
+	if update.EstimatedCostUSD != wantCost {
+		t.Errorf("EstimatedCostUSD = %v, want %v", update.EstimatedCostUSD, wantCost)
 	}
 }

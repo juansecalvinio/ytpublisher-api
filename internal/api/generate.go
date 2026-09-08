@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	"github.com/juansecalvinio/ytpublisher-api/internal/generation"
+	"github.com/juansecalvinio/ytpublisher-api/internal/pricing"
+	"github.com/juansecalvinio/ytpublisher-api/internal/storage"
 )
 
 type GenerationOrchestrator interface {
@@ -27,7 +29,7 @@ type generateRequest struct {
 	Tone      string   `json:"tone"`
 }
 
-func handleGenerate(orchestrator GenerationOrchestrator, reporter UsageReporter) http.HandlerFunc {
+func handleGenerate(orchestrator GenerationOrchestrator, reporter UsageReporter, recorder UsageRecorder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req generateRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -48,6 +50,22 @@ func handleGenerate(orchestrator GenerationOrchestrator, reporter UsageReporter)
 			Mentions:  req.Mentions,
 			Tone:      req.Tone,
 		})
+
+		// Record whatever usage actually happened, even on failure — a
+		// request that burned tokens before erroring still has a real cost.
+		if requestID, ok := RequestIDFromContext(r.Context()); ok {
+			cost := pricing.ClaudeCost(output.Usage.LLMInputTokens, output.Usage.LLMOutputTokens) +
+				pricing.EmbeddingCost(output.Usage.EmbeddingTokens)
+			if updateErr := recorder.UpdateUsageEvent(r.Context(), requestID, storage.UsageUpdate{
+				LLMInputTokens:   output.Usage.LLMInputTokens,
+				LLMOutputTokens:  output.Usage.LLMOutputTokens,
+				EmbeddingCalls:   output.Usage.EmbeddingCalls,
+				EstimatedCostUSD: cost,
+			}); updateErr != nil {
+				log.Printf("generate: failed to update usage event %s: %v", requestID, updateErr)
+			}
+		}
+
 		if err != nil {
 			log.Printf("generate: %v", err)
 			writeJSONError(w, http.StatusInternalServerError, "failed to generate content")

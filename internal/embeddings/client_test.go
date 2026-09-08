@@ -14,7 +14,7 @@ func TestEmbedDocuments_ReturnsVectorsWithExpectedDimension(t *testing.T) {
 
 	client := NewClient(apiKey, "voyage-3.5-lite")
 
-	vectors, err := client.EmbedDocuments(context.Background(), []string{"Go programming tutorial", "How to bake bread"})
+	vectors, usage, err := client.EmbedDocuments(context.Background(), []string{"Go programming tutorial", "How to bake bread"})
 	if err != nil {
 		t.Fatalf("EmbedDocuments() returned unexpected error: %v", err)
 	}
@@ -26,6 +26,9 @@ func TestEmbedDocuments_ReturnsVectorsWithExpectedDimension(t *testing.T) {
 			t.Errorf("len(vectors[%d]) = %d, want 1024", i, len(v))
 		}
 	}
+	if usage.TotalTokens == 0 {
+		t.Error("usage.TotalTokens = 0, want a real token count")
+	}
 }
 
 func TestEmbedQuery_ReturnsSingleVector(t *testing.T) {
@@ -36,11 +39,14 @@ func TestEmbedQuery_ReturnsSingleVector(t *testing.T) {
 
 	client := NewClient(apiKey, "voyage-3.5-lite")
 
-	vector, err := client.EmbedQuery(context.Background(), "Go programming")
+	vector, usage, err := client.EmbedQuery(context.Background(), "Go programming")
 	if err != nil {
 		t.Fatalf("EmbedQuery() returned unexpected error: %v", err)
 	}
 	if len(vector) != 1024 {
 		t.Errorf("len(vector) = %d, want 1024", len(vector))
+	}
+	if usage.TotalTokens == 0 {
+		t.Error("usage.TotalTokens = 0, want a real token count")
 	}
 }

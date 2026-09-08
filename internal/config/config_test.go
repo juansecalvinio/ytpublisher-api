@@ -21,6 +21,8 @@ func setRequiredEnv(t *testing.T) {
 	t.Setenv("RESEND_API_KEY", "re_dummy")
 	t.Setenv("RESEND_FROM_EMAIL", "")
 	t.Setenv("PUBLIC_BASE_URL", "http://localhost:8081")
+	t.Setenv("RATE_LIMIT_PER_MINUTE", "")
+	t.Setenv("RATE_LIMIT_PER_DAY", "")
 }
 
 func TestLoad_UsesDefaultPortWhenUnset(t *testing.T) {
@@ -294,5 +296,75 @@ func TestLoad_ErrorsWhenPublicBaseURLMissing(t *testing.T) {
 	_, err := Load()
 	if !errors.Is(err, ErrMissingPublicBaseURL) {
 		t.Errorf("err = %v, want ErrMissingPublicBaseURL", err)
+	}
+}
+
+func TestLoad_UsesDefaultRateLimitPerMinuteWhenUnset(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.RateLimitPerMinute != 10 {
+		t.Errorf("RateLimitPerMinute = %d, want 10", cfg.RateLimitPerMinute)
+	}
+}
+
+func TestLoad_ReadsCustomRateLimitPerMinute(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("RATE_LIMIT_PER_MINUTE", "20")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.RateLimitPerMinute != 20 {
+		t.Errorf("RateLimitPerMinute = %d, want 20", cfg.RateLimitPerMinute)
+	}
+}
+
+func TestLoad_ErrorsWhenRateLimitPerMinuteInvalid(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("RATE_LIMIT_PER_MINUTE", "not-a-number")
+
+	_, err := Load()
+	if !errors.Is(err, ErrInvalidRateLimitPerMinute) {
+		t.Errorf("err = %v, want ErrInvalidRateLimitPerMinute", err)
+	}
+}
+
+func TestLoad_UsesDefaultRateLimitPerDayWhenUnset(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.RateLimitPerDay != 200 {
+		t.Errorf("RateLimitPerDay = %d, want 200", cfg.RateLimitPerDay)
+	}
+}
+
+func TestLoad_ReadsCustomRateLimitPerDay(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("RATE_LIMIT_PER_DAY", "500")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.RateLimitPerDay != 500 {
+		t.Errorf("RateLimitPerDay = %d, want 500", cfg.RateLimitPerDay)
+	}
+}
+
+func TestLoad_ErrorsWhenRateLimitPerDayInvalid(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("RATE_LIMIT_PER_DAY", "not-a-number")
+
+	_, err := Load()
+	if !errors.Is(err, ErrInvalidRateLimitPerDay) {
+		t.Errorf("err = %v, want ErrInvalidRateLimitPerDay", err)
 	}
 }

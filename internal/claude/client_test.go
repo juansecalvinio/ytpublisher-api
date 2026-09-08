@@ -18,7 +18,7 @@ func TestGenerate_ReturnsPopulatedDraft(t *testing.T) {
 
 	client := NewClient(apiKey, "claude-sonnet-5")
 
-	draft, err := client.Generate(context.Background(), GenerateInput{
+	draft, usage, err := client.Generate(context.Background(), GenerateInput{
 		Topic:    "How to write your first Go program",
 		Language: "English",
 		Tone:     "friendly and encouraging",
@@ -40,6 +40,12 @@ func TestGenerate_ReturnsPopulatedDraft(t *testing.T) {
 	if len(draft.Tags) == 0 {
 		t.Error("draft.Tags is empty")
 	}
+	if usage.InputTokens == 0 {
+		t.Error("usage.InputTokens = 0, want a real token count")
+	}
+	if usage.OutputTokens == 0 {
+		t.Error("usage.OutputTokens = 0, want a real token count")
+	}
 }
 
 func TestRepair_FixesReportedViolation(t *testing.T) {
@@ -60,7 +66,7 @@ func TestRepair_FixesReportedViolation(t *testing.T) {
 		{Field: "title", Message: "title is 150 characters, must be 100 or fewer"},
 	}
 
-	repaired, err := client.Repair(context.Background(), badDraft, violations)
+	repaired, _, err := client.Repair(context.Background(), badDraft, violations)
 	if err != nil {
 		t.Fatalf("Repair() returned unexpected error: %v", err)
 	}

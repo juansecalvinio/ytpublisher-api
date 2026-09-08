@@ -18,15 +18,24 @@ type ClientFinder interface {
 
 type UsageRecorder interface {
 	InsertUsageEvent(ctx context.Context, event storage.UsageEvent) error
+	UpdateUsageEvent(ctx context.Context, requestID string, update storage.UsageUpdate) error
 }
 
 type contextKey int
 
-const clientContextKey contextKey = iota
+const (
+	clientContextKey contextKey = iota
+	requestIDContextKey
+)
 
 func ClientFromContext(ctx context.Context) (storage.Client, bool) {
 	c, ok := ctx.Value(clientContextKey).(storage.Client)
 	return c, ok
+}
+
+func RequestIDFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(requestIDContextKey).(string)
+	return id, ok
 }
 
 func RequireAPIKey(finder ClientFinder, recorder UsageRecorder) func(http.Handler) http.Handler {
@@ -59,6 +68,7 @@ func RequireAPIKey(finder ClientFinder, recorder UsageRecorder) func(http.Handle
 			}
 
 			ctx := context.WithValue(r.Context(), clientContextKey, client)
+			ctx = context.WithValue(ctx, requestIDContextKey, requestID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
